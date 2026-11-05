@@ -1,0 +1,54 @@
+
+[
+  {
+    "id": "filesystem_list",
+    "category": "filesystem",
+    "prompt": "List the files in the current sandbox directory.",
+    "expected_tool": "list_directory",
+    "expected_arguments": {
+      "path": "."
+    }
+  },
+  {
+    "id": "filesystem_read",
+    "category": "filesystem",
+    "prompt": "Read strange_test.txt from the sandbox.",
+    "expected_tool": "read_file",
+    "expected_arguments": {
+      "path": "strange_test.txt"
+    }
+  },
+  {
+    "id": "filesystem_write",
+    "category": "filesystem",
+    "prompt": "Create hello.txt in the sandbox with the exact content STRANGE is operational.",
+    "expected_tool": "write_file",
+    "expected_arguments": {
+      "path": "hello.txt",
+      "content": "STRANGE is operational."
+    }
+  },
+  {
+    "id": "filesystem_create_directory",
+    "category": "filesystem",
+    "prompt": "Create a directory named evaluation_test in the sandbox.",
+    "expected_tool": "create_directory",
+    "expected_arguments": {
+      "path": "evaluation_test"
+    }
+  },
+  {
+    "id": "system_stats",
+    "category": "system",
+    "prompt": "Get my system statistics.",
+    "expected_tool": "get_system_stats",
+    "expected_arguments": {}
+  },
+  {
+    "id": "running_processes",
+    "category": "system",
+    "prompt": "Show my running processes.",
+    "expected_tool": "get_running_processes",
+    "expected_arguments": {}
+  }
+]
