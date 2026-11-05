@@ -59,7 +59,7 @@ export const toolRegistry = {
     },
 
     read_file: {
-        description: "Read a text file.",
+        description: "Read a file inside the sandbox. IMPORTANT: The sandbox root is already provided automatically. Paths must be relative to that root. Never prefix paths with 'sandbox/'. Example: use 'strange_test.txt', not 'sandbox/strange_test.txt'.",
         schema: z.object({
             path: z.string()
         }),
@@ -67,7 +67,7 @@ export const toolRegistry = {
     },
 
     write_file: {
-        description: "Create or overwrite a text file.",
+        description: "Create or overwrite a text file inside the sandbox. IMPORTANT: Paths are relative to the sandbox root. Never prefix paths with 'sandbox/'. Example: use 'hello.txt', not 'sandbox/hello.txt'.",
         schema: z.object({
             path: z.string(),
             content: z.string()
@@ -76,7 +76,7 @@ export const toolRegistry = {
     },
 
     create_directory: {
-        description: "Create a directory.",
+        description: "Create a directory inside the sandbox. IMPORTANT: Paths are relative to the sandbox root. Never prefix paths with 'sandbox/'. Example: use 'evaluation_test', not 'sandbox/evaluation_test'.",
         schema: z.object({
             path: z.string()
         }),
@@ -84,7 +84,7 @@ export const toolRegistry = {
     },
 
     list_directory: {
-        description: "List files and folders in a directory.",
+        description: "List files and directories inside the sandbox. IMPORTANT: All paths are relative to the sandbox root. Use '.' for the sandbox root. Never prefix paths with 'sandbox/'. Example: use 'notes.txt', not 'sandbox/notes.txt'.",
         schema: z.object({
             path: z.string()
         }),

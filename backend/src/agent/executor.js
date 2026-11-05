@@ -25,6 +25,36 @@ export async function executeTool(toolCall) {
         };
     }
 
+    function normalizeFilesystemPath(toolName, args) {
+        const filesystemTools = new Set([
+            "list_directory",
+            "read_file",
+            "write_file",
+            "create_directory"
+        ]);
+
+        if (!filesystemTools.has(toolName)) {
+            return args;
+        }
+
+        if (typeof args.path !== "string") {
+            return args;
+        }
+
+        let normalizedPath = args.path.replace(/\\/g, "/");
+
+        if (normalizedPath === "sandbox") {
+            normalizedPath = ".";
+        } else if (normalizedPath.startsWith("sandbox/")) {
+            normalizedPath = normalizedPath.slice("sandbox/".length);
+        }
+
+        return {
+            ...args,
+            path: normalizedizedPath
+        };
+    }
+
     const validation = tool.schema.safeParse(args);
 
     if (!validation.success) {

@@ -28,6 +28,28 @@ Rules:
    another attempt is appropriate.
 7. Do not repeatedly call a tool with identical arguments
    after it has failed.
+
+IMPORTANT FILESYSTEM PATH NORMALIZATION:
+
+The filesystem tools already operate inside the sandbox root.
+
+Never include the sandbox directory name in a filesystem tool path.
+
+Correct:
+- Read strange_test.txt -> {"path":"strange_test.txt"}
+- Create hello.txt -> {"path":"hello.txt"}
+- Create evaluation_test -> {"path":"evaluation_test"}
+- List sandbox contents -> {"path":"."}
+
+Incorrect:
+- {"path":"sandbox/strange_test.txt"}
+- {"path":"sandbox/hello.txt"}
+- {"path":"sandbox/evaluation_test"}
+
+When the user says "in the sandbox", "inside the sandbox", or "from the sandbox",
+that describes the tool's execution environment. It does not belong in the path.
+
+Before calling any filesystem tool, verify that the path does not begin with "sandbox/".
 `;
 
 export async function askOllama(userMessage) {
