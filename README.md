@@ -1,0 +1,1 @@
+S.T.R.A.N.G.E.	Smart Task Reasoning and Autonomous Navigation for General Execution
