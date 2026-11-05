@@ -30,31 +30,42 @@ export async function executeTool(toolCall) {
             "list_directory",
             "read_file",
             "write_file",
-            "create_directory"
+            "create_directory",
         ]);
 
-        if (!filesystemTools.has(toolName)) {
+        if (
+            !filesystemTools.has(toolName) ||
+            typeof args?.path !== "string"
+        ) {
             return args;
         }
 
-        if (typeof args.path !== "string") {
-            return args;
-        }
+        let normalizedPath = args.path.trim().replace(/\\/g, "/");
 
-        let normalizedPath = args.path.replace(/\\/g, "/");
-
-        if (normalizedPath === "sandbox") {
+        // The sandbox is already the root directory.
+        if (normalizedPath.toLowerCase() === "sandbox") {
             normalizedPath = ".";
-        } else if (normalizedPath.startsWith("sandbox/")) {
+        }
+
+        // Remove redundant sandbox/ prefixes.
+        while (normalizedPath.toLowerCase().startsWith("sandbox/")) {
             normalizedPath = normalizedPath.slice("sandbox/".length);
+        }
+
+        if (!normalizedPath) {
+            normalizedPath = ".";
         }
 
         return {
             ...args,
-            path: normalizedizedPath
+            path: normalizedPath,
         };
     }
 
+    // Normalize filesystem paths before schema validation.
+    args = normalizeFilesystemPath(name, args);
+
+    console.log("[STRANGE] Normalized tool args:", args);
     const validation = tool.schema.safeParse(args);
 
     if (!validation.success) {
