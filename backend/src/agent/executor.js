@@ -68,7 +68,7 @@ export async function executeTool(toolCall) {
 
     let appResolution = null;
     if (
-        name === "open_application" &&
+        (name === "open_application" || name === "close_application") &&
         typeof args?.app_name === "string"
     ) {
         appResolution = resolveApplication(args.app_name);
@@ -91,7 +91,7 @@ export async function executeTool(toolCall) {
         };
     }
 
-    if (name === "open_application") {
+    if (name === "open_application" || name === "close_application") {
         const resolution =
             appResolution ?? resolveApplication(validation.data.app_name);
 
@@ -122,6 +122,15 @@ export async function executeTool(toolCall) {
                 message: result.message,
                 candidates: result.candidates,
                 confidence: result.confidence,
+                result
+            };
+        }
+
+        if (result && result.success === false) {
+            return {
+                success: false,
+                tool: name,
+                error: result.error || result.message,
                 result
             };
         }

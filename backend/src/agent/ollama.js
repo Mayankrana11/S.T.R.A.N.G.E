@@ -54,8 +54,10 @@ that describes the tool's execution environment. It does not belong in the path.
 
 Before calling any filesystem tool, verify that the path does not begin with "sandbox/".
 
-APPLICATION LAUNCHING:
+APPLICATION LAUNCHING AND CLOSING:
+- Supported applications include Visual Studio Code (vscode), Visual Studio (visual_studio), Google Chrome (chrome), Notepad (notepad), Calculator (calculator), Paint (paint), Steam (steam), Discord (discord), and Spotify (spotify).
 - When the user asks to open or launch an application (including by alias or role such as "my code editor" -> "vscode"), call open_application directly instead of list_applications.
+- When the user asks to close, quit, exit, or terminate an application, call close_application directly.
 `;
 
 export async function askOllama(userMessage) {

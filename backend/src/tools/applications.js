@@ -1,5 +1,12 @@
-import { spawn } from "node:child_process";
-import { execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+const LOCALAPPDATA = process.env.LOCALAPPDATA || "";
+const APPDATA = process.env.APPDATA || "";
+const PROGRAM_FILES = process.env.ProgramFiles || "C:\\Program Files";
+const PROGRAM_FILES_X86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+const SYSTEM_ROOT = process.env.SystemRoot || "C:\\Windows";
 
 export const APPLICATION_REGISTRY = [
     {
@@ -75,6 +82,42 @@ export const APPLICATION_REGISTRY = [
             "mspaint",
             "ms paint",
             "microsoft paint"
+        ]
+    },
+    {
+        id: "steam",
+        name: "Steam",
+        executable: "steam",
+        aliases: [
+            "steam",
+            "valve steam",
+            "steam client",
+            "steam app",
+            "steam launcher"
+        ]
+    },
+    {
+        id: "discord",
+        name: "Discord",
+        executable: "discord",
+        aliases: [
+            "discord",
+            "discord app",
+            "discord client",
+            "discord chat"
+        ]
+    },
+    {
+        id: "spotify",
+        name: "Spotify",
+        executable: "spotify",
+        aliases: [
+            "spotify",
+            "spotify music",
+            "spotify app",
+            "spotify client",
+            "spotify player",
+            "music player"
         ]
     }
 ];
@@ -675,6 +718,203 @@ export function areEquivalentApplications(
 }
 
 
+function pathExists(filePath) {
+    if (!filePath || typeof filePath !== "string") {
+        return false;
+    }
+
+    try {
+        if (fs.existsSync(filePath)) {
+            return true;
+        }
+        // Windows Store App Execution Aliases in WindowsApps are reparse points
+        // where existsSync returns false, but lstatSync succeeds.
+        fs.lstatSync(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function findDiscordExecutables() {
+    if (!LOCALAPPDATA) return [];
+    const discordDir = path.join(LOCALAPPDATA, "Discord");
+    const candidates = [];
+
+    try {
+        if (fs.existsSync(discordDir)) {
+            const appDirs = fs
+                .readdirSync(discordDir)
+                .filter(name => name.startsWith("app-"))
+                .sort()
+                .reverse();
+
+            for (const dir of appDirs) {
+                candidates.push({
+                    executable: path.join(discordDir, dir, "Discord.exe"),
+                    args: []
+                });
+            }
+        }
+    } catch {
+        // Ignore directory read errors and fall back to standard Discord paths
+    }
+
+    candidates.push(
+        {
+            executable: path.join(discordDir, "Discord.exe"),
+            args: []
+        },
+        {
+            executable: path.join(discordDir, "Update.exe"),
+            args: ["--processStart", "Discord.exe"]
+        }
+    );
+
+    return candidates;
+}
+
+function queryRegistryValue(keyPath, valueName) {
+    try {
+        const args = valueName
+            ? ["query", keyPath, "/v", valueName]
+            : ["query", keyPath, "/ve"];
+        const output = execFileSync("reg.exe", args, {
+            encoding: "utf8",
+            windowsHide: true,
+            stdio: ["ignore", "pipe", "ignore"]
+        });
+
+        const match = output.match(/REG_(?:EXPAND_)?SZ\s+(.+)/i);
+        if (!match) return null;
+
+        return match[1].trim().replace(/^"+|"+$/g, "");
+    } catch {
+        return null;
+    }
+}
+
+function queryAppPathRegistry(exeName) {
+    const roots = [
+        `HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeName}`,
+        `HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${exeName}`
+    ];
+
+    for (const keyPath of roots) {
+        const resolved = queryRegistryValue(keyPath, null);
+        if (resolved && pathExists(resolved)) {
+            return resolved;
+        }
+    }
+
+    return null;
+}
+
+function querySteamRegistryExecutable() {
+    const steamExe = queryRegistryValue("HKCU\\Software\\Valve\\Steam", "SteamExe");
+    if (steamExe) {
+        const normalized = path.normalize(steamExe);
+        if (pathExists(normalized)) {
+            return normalized;
+        }
+    }
+
+    const installPath = queryRegistryValue(
+        "HKLM\\SOFTWARE\\WOW6432Node\\Valve\\Steam",
+        "InstallPath"
+    );
+    if (installPath) {
+        const candidate = path.join(installPath, "steam.exe");
+        if (pathExists(candidate)) {
+            return candidate;
+        }
+    }
+
+    return null;
+}
+
+function getCandidateTargets(app) {
+    switch (app.id) {
+        case "vscode":
+            return [
+                { executable: path.join(LOCALAPPDATA, "Programs", "Microsoft VS Code", "Code.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES, "Microsoft VS Code", "Code.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES_X86, "Microsoft VS Code", "Code.exe"), args: [] }
+            ];
+        case "chrome":
+            return [
+                { executable: path.join(PROGRAM_FILES, "Google", "Chrome", "Application", "chrome.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES_X86, "Google", "Chrome", "Application", "chrome.exe"), args: [] },
+                { executable: path.join(LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"), args: [] }
+            ];
+        case "visual_studio":
+            return [
+                { executable: path.join(PROGRAM_FILES, "Microsoft Visual Studio", "2022", "Community", "Common7", "IDE", "devenv.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES, "Microsoft Visual Studio", "2022", "Professional", "Common7", "IDE", "devenv.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES, "Microsoft Visual Studio", "2022", "Enterprise", "Common7", "IDE", "devenv.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES_X86, "Microsoft Visual Studio", "2019", "Community", "Common7", "IDE", "devenv.exe"), args: [] }
+            ];
+        case "steam": {
+            const staticTargets = [
+                { executable: "D:\\Steam\\steam.exe", args: [] },
+                { executable: path.join(PROGRAM_FILES_X86, "Steam", "steam.exe"), args: [] },
+                { executable: path.join(PROGRAM_FILES, "Steam", "steam.exe"), args: [] },
+                { executable: "C:\\Steam\\steam.exe", args: [] },
+                { executable: "D:\\Program Files (x86)\\Steam\\steam.exe", args: [] },
+                { executable: "E:\\Steam\\steam.exe", args: [] }
+            ];
+            const regExe = querySteamRegistryExecutable();
+            if (regExe) {
+                staticTargets.unshift({ executable: regExe, args: [] });
+            }
+            return staticTargets;
+        }
+        case "discord":
+            return findDiscordExecutables();
+        case "spotify":
+            return [
+                { executable: path.join(APPDATA, "Spotify", "Spotify.exe"), args: [] },
+                { executable: path.join(LOCALAPPDATA, "Spotify", "Spotify.exe"), args: [] },
+                { executable: path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "Spotify.exe"), args: [] }
+            ];
+        case "notepad":
+            return [
+                { executable: path.join(SYSTEM_ROOT, "System32", "notepad.exe"), args: [] },
+                { executable: path.join(SYSTEM_ROOT, "notepad.exe"), args: [] }
+            ];
+        case "calculator":
+            return [
+                { executable: path.join(SYSTEM_ROOT, "System32", "calc.exe"), args: [] }
+            ];
+        case "paint":
+            return [
+                { executable: path.join(SYSTEM_ROOT, "System32", "mspaint.exe"), args: [] },
+                { executable: path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "mspaint.exe"), args: [] }
+            ];
+        default:
+            return [];
+    }
+}
+
+function resolveExecutableTarget(app) {
+    const candidates = getCandidateTargets(app);
+    for (const candidate of candidates) {
+        if (pathExists(candidate.executable)) {
+            return candidate;
+        }
+    }
+
+    const exeWithExt = app.executable.toLowerCase().endsWith(".exe")
+        ? app.executable
+        : `${app.executable}.exe`;
+    const registryResolved = queryAppPathRegistry(exeWithExt);
+    if (registryResolved) {
+        return { executable: registryResolved, args: [] };
+    }
+
+    return { executable: app.executable, args: [] };
+}
+
 export async function openApplication(args) {
     const resolution = resolveApplication(args?.app_name);
 
@@ -693,9 +933,10 @@ export async function openApplication(args) {
     }
 
     const app = resolution.application;
+    const target = resolveExecutableTarget(app);
 
     return new Promise((resolve) => {
-        const child = spawn(app.executable, [], {
+        const child = spawn(target.executable, target.args, {
             detached: true,
             stdio: "ignore",
             windowsHide: false
@@ -710,7 +951,7 @@ export async function openApplication(args) {
                 application: app.id,
                 canonical_id: app.id,
                 application_name: app.name,
-                executable: app.executable,
+                executable: target.executable,
                 confidence: resolution.confidence,
                 match_type: resolution.match_type,
                 simulated: false
@@ -724,7 +965,7 @@ export async function openApplication(args) {
                 application: app.id,
                 canonical_id: app.id,
                 application_name: app.name,
-                executable: app.executable,
+                executable: target.executable,
                 confidence: resolution.confidence,
                 match_type: resolution.match_type,
                 simulated: false,
@@ -757,11 +998,14 @@ export async function closeApplication(args) {
     // Windows process names for each registered application.
     const processMap = {
         notepad: ["notepad.exe"],
-        calculator: ["Calculator.exe", "CalculatorApp.exe", "calc.exe"],
+        calculator: ["CalculatorApp.exe", "Calculator.exe", "calc.exe"],
         chrome: ["chrome.exe"],
         vscode: ["Code.exe"],
         visual_studio: ["devenv.exe"],
-        paint: ["mspaint.exe"]
+        paint: ["mspaint.exe"],
+        steam: ["steam.exe", "steamwebhelper.exe"],
+        discord: ["Discord.exe"],
+        spotify: ["Spotify.exe"]
     };
 
     const processes = processMap[app.id];
@@ -777,21 +1021,34 @@ export async function closeApplication(args) {
         };
     }
 
+    const taskkillPath = pathExists(path.join(SYSTEM_ROOT, "System32", "taskkill.exe"))
+        ? path.join(SYSTEM_ROOT, "System32", "taskkill.exe")
+        : "taskkill.exe";
+
     // Attempt to terminate each configured process name.
     const results = [];
+    let terminatedProcess = null;
 
     for (const processName of processes) {
         const result = await new Promise((resolve) => {
             execFile(
-                "taskkill.exe",
+                taskkillPath,
                 ["/F", "/T", "/IM", processName],
                 (error, stdout, stderr) => {
+                    const stdoutText = (stdout ?? "").trim();
+                    const stderrText = (stderr ?? "").trim();
+                    // Multi-process apps (Chrome, VS Code, Discord, Steam, Spotify)
+                    // often exit with code 128 on child processes that were already
+                    // killed when their parent tree (/T) was terminated, while still
+                    // printing "SUCCESS: The process ... has been terminated." to stdout.
+                    const terminated = !error || /SUCCESS:/i.test(stdoutText);
+
                     resolve({
                         process: processName,
-                        success: !error,
-                        error: error
-                            ? (stderr?.trim() || error.message)
-                            : undefined
+                        success: terminated,
+                        error: terminated
+                            ? undefined
+                            : (stderrText || error?.message)
                     });
                 }
             );
@@ -799,23 +1056,29 @@ export async function closeApplication(args) {
 
         results.push(result);
 
-        if (result.success) {
-            return {
-                success: true,
-                action: "close_application",
-                application: app.id,
-                application_name: app.name,
-                process: processName,
-                simulated: false,
-                message: `${app.name} was terminated.`
-            };
+        if (result.success && !terminatedProcess) {
+            terminatedProcess = processName;
         }
+    }
+
+    if (terminatedProcess) {
+        return {
+            success: true,
+            action: "close_application",
+            application: app.id,
+            canonical_id: app.id,
+            application_name: app.name,
+            process: terminatedProcess,
+            simulated: false,
+            message: `${app.name} was terminated.`
+        };
     }
 
     return {
         success: false,
         action: "close_application",
         application: app.id,
+        canonical_id: app.id,
         application_name: app.name,
         simulated: false,
         error: `Could not terminate ${app.name}.`,
