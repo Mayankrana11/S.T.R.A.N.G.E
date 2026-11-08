@@ -3,8 +3,10 @@ import ollama from "ollama";
 import dotenv from "dotenv";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { toolSchemas } from "../src/agent/registry.js";
+import { resolveApplication } from "../src/tools/applications.js";
 
 dotenv.config();
 
@@ -84,9 +86,43 @@ function normalize(value) {
     return value;
 }
 
-function deepEqual(a, b) {
+export function normalizeArgumentsForEvaluation(toolName, args) {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+        return args;
+    }
+
+    if (
+        (toolName === "open_application" || toolName === "close_application") &&
+        typeof args.app_name === "string"
+    ) {
+        const resolution = resolveApplication(args.app_name);
+        if (resolution.status === "resolved") {
+            return {
+                ...args,
+                app_name: resolution.canonical_id
+            };
+        }
+    }
+
+    return args;
+}
+
+export function deepEqual(a, b) {
     return JSON.stringify(normalize(a)) ===
            JSON.stringify(normalize(b));
+}
+
+export function areToolArgumentsEqual(toolName, actualArgs, expectedArgs) {
+    const normalizedActual = normalizeArgumentsForEvaluation(
+        toolName,
+        actualArgs
+    );
+    const normalizedExpected = normalizeArgumentsForEvaluation(
+        toolName,
+        expectedArgs
+    );
+
+    return deepEqual(normalizedActual, normalizedExpected);
 }
 
 async function runTest(testCase) {
@@ -158,7 +194,8 @@ async function runTest(testCase) {
             actualTool === testCase.expected_tool;
 
         const argumentPass =
-            deepEqual(
+            areToolArgumentsEqual(
+                testCase.expected_tool,
                 actualArguments,
                 testCase.expected_arguments
             );
@@ -393,7 +430,13 @@ async function main() {
     console.log(`\nFull report saved to: ${reportPath}`);
 }
 
-main().catch(error => {
-    console.error("Evaluation failed:", error);
-    process.exit(1);
-});
+const isDirectRun =
+    process.argv[1] &&
+    path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+    main().catch(error => {
+        console.error("Evaluation failed:", error);
+        process.exit(1);
+    });
+}

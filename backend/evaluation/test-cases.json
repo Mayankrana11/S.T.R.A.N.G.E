@@ -1,4 +1,3 @@
-
 [
   {
     "id": "filesystem_list",
@@ -50,5 +49,14 @@
     "prompt": "Show my running processes.",
     "expected_tool": "get_running_processes",
     "expected_arguments": {}
+  },
+  {
+    "id": "application_open",
+    "category": "application",
+    "prompt": "Open Visual Studio Code.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "Visual Studio Code"
+    }
   }
 ]
