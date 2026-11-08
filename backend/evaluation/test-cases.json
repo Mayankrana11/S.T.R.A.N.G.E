@@ -124,5 +124,91 @@
     "expected_arguments": {
       "app_name": "notepad"
     }
+  },
+  {
+    "id": "application_close_notepad",
+    "category": "application",
+    "prompt": "Close Notepad.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "notepad"
+    }
+  },
+  {
+    "id": "application_close_calculator",
+    "category": "application",
+    "prompt": "Close Calculator.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "calculator"
+    }
+  },
+  {
+    "id": "application_close_chrome",
+    "category": "application",
+    "prompt": "Close Google Chrome.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "chrome"
+    }
+  },
+  {
+    "id": "application_close_vscode",
+    "category": "application",
+    "prompt": "Close Visual Studio Code.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "vscode"
+    }
+  },
+  {
+    "id": "application_close_notepad_alias",
+    "category": "application",
+    "prompt": "Exit Notepad.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "notepad"
+    }
+  },
+  {
+    "id": "application_close_calculator_alias",
+    "category": "application",
+    "prompt": "Quit the Windows calculator.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "calculator"
+    }
+  },
+  {
+    "id": "application_close_vscode_alias",
+    "category": "application",
+    "prompt": "Terminate my code editor.",
+    "expected_tool": "close_application",
+    "expected_arguments": {
+      "app_name": "vscode"
+    }
+  },
+  {
+    "id": "application_open_close_sequence",
+    "category": "application",
+    "prompt": "Open Notepad and then close it.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "notepad"
+    },
+    "expected_sequence": [
+      {
+        "tool": "open_application",
+        "arguments": {
+          "app_name": "notepad"
+        }
+      },
+      {
+        "tool": "close_application",
+        "arguments": {
+          "app_name": "notepad"
+        }
+      }
+    ]
   }
 ]

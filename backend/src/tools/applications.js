@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 
 export const APPLICATION_REGISTRY = [
     {
@@ -734,20 +735,94 @@ export async function openApplication(args) {
 }
 
 
+
 export async function closeApplication(args) {
     const resolution = resolveApplication(args?.app_name);
-    const canonicalId =
-        resolution.status === "resolved"
-            ? resolution.canonical_id
-            : args?.app_name;
+
+    if (resolution.status !== "resolved") {
+        return {
+            success: false,
+            action: "close_application",
+            application: args?.app_name,
+            status: resolution.status,
+            error: resolution.message,
+            candidates: resolution.candidates,
+            requires_clarification: true,
+            simulated: false
+        };
+    }
+
+    const app = resolution.application;
+
+    // Windows process names for each registered application.
+    const processMap = {
+        notepad: ["notepad.exe"],
+        calculator: ["Calculator.exe", "CalculatorApp.exe", "calc.exe"],
+        chrome: ["chrome.exe"],
+        vscode: ["Code.exe"],
+        visual_studio: ["devenv.exe"],
+        paint: ["mspaint.exe"]
+    };
+
+    const processes = processMap[app.id];
+
+    if (!processes) {
+        return {
+            success: false,
+            action: "close_application",
+            application: app.id,
+            application_name: app.name,
+            error: `No process mapping configured for ${app.name}.`,
+            simulated: false
+        };
+    }
+
+    // Attempt to terminate each configured process name.
+    const results = [];
+
+    for (const processName of processes) {
+        const result = await new Promise((resolve) => {
+            execFile(
+                "taskkill.exe",
+                ["/F", "/T", "/IM", processName],
+                (error, stdout, stderr) => {
+                    resolve({
+                        process: processName,
+                        success: !error,
+                        error: error
+                            ? (stderr?.trim() || error.message)
+                            : undefined
+                    });
+                }
+            );
+        });
+
+        results.push(result);
+
+        if (result.success) {
+            return {
+                success: true,
+                action: "close_application",
+                application: app.id,
+                application_name: app.name,
+                process: processName,
+                simulated: false,
+                message: `${app.name} was terminated.`
+            };
+        }
+    }
 
     return {
-        success: true,
+        success: false,
         action: "close_application",
-        application: canonicalId,
-        simulated: true
+        application: app.id,
+        application_name: app.name,
+        simulated: false,
+        error: `Could not terminate ${app.name}.`,
+        process_results: results
     };
 }
+
 
 export async function listApplications() {
     return {
