@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test:tools": "node evaluation/tester.js"
+    "test:tools": "node evaluation/tester.js",
+    "terminal" : "node src/terminal.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
