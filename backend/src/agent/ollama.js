@@ -53,6 +53,9 @@ When the user says "in the sandbox", "inside the sandbox", or "from the sandbox"
 that describes the tool's execution environment. It does not belong in the path.
 
 Before calling any filesystem tool, verify that the path does not begin with "sandbox/".
+
+APPLICATION LAUNCHING:
+- When the user asks to open or launch an application (including by alias or role such as "my code editor" -> "vscode"), call open_application directly instead of list_applications.
 `;
 
 export async function askOllama(userMessage) {

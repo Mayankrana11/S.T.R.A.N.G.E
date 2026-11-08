@@ -10,6 +10,8 @@ export const APPLICATION_REGISTRY = [
             "code",
             "vsc",
             "vs-code",
+            "code editor",
+            "my code editor",
             "microsoft visual studio code",
             "ms vs code",
             "ms vscode"
@@ -27,6 +29,17 @@ export const APPLICATION_REGISTRY = [
             "ms visual studio",
             "devenv",
             "visual studio 2022"
+        ]
+    },
+    {
+        id: "chrome",
+        name: "Google Chrome",
+        executable: "chrome",
+        aliases: [
+            "chrome",
+            "google chrome",
+            "chrome browser",
+            "google chrome browser"
         ]
     },
     {
