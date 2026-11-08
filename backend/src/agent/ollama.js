@@ -7,7 +7,7 @@ import { executeTool } from "./executor.js";
 
 dotenv.config();
 
-const MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
+const MODEL = process.env.OLLAMA_MODEL || "qwen3.5:4b";
 
 const MAX_ITERATIONS = Number(
     process.env.MAX_TOOL_ITERATIONS || 8
@@ -15,7 +15,7 @@ const MAX_ITERATIONS = Number(
 
 const SYSTEM_PROMPT = `
 You are STRANGE, a local desktop assistant.
-
+S.T.R.A.N.G.E stands for Smart Task Reasoning and Autonomous Navigation for General Execution
 You can use tools to interact with the computer.
 
 Rules:

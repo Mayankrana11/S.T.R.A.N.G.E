@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+
 export const APPLICATION_REGISTRY = [
     {
         id: "vscode",
@@ -671,6 +673,7 @@ export function areEquivalentApplications(
     return false;
 }
 
+
 export async function openApplication(args) {
     const resolution = resolveApplication(args?.app_name);
 
@@ -684,25 +687,52 @@ export async function openApplication(args) {
             message: resolution.message,
             candidates: resolution.candidates,
             confidence: resolution.confidence,
-            simulated: true
+            simulated: false
         };
     }
 
     const app = resolution.application;
 
-    // Evaluation mode: do not launch actual Windows applications.
-    return {
-        success: true,
-        action: "open_application",
-        application: app.id,
-        canonical_id: app.id,
-        application_name: app.name,
-        executable: app.executable,
-        confidence: resolution.confidence,
-        match_type: resolution.match_type,
-        simulated: true
-    };
+    return new Promise((resolve) => {
+        const child = spawn(app.executable, [], {
+            detached: true,
+            stdio: "ignore",
+            windowsHide: false
+        });
+
+        child.once("spawn", () => {
+            child.unref();
+
+            resolve({
+                success: true,
+                action: "open_application",
+                application: app.id,
+                canonical_id: app.id,
+                application_name: app.name,
+                executable: app.executable,
+                confidence: resolution.confidence,
+                match_type: resolution.match_type,
+                simulated: false
+            });
+        });
+
+        child.once("error", (error) => {
+            resolve({
+                success: false,
+                action: "open_application",
+                application: app.id,
+                canonical_id: app.id,
+                application_name: app.name,
+                executable: app.executable,
+                confidence: resolution.confidence,
+                match_type: resolution.match_type,
+                simulated: false,
+                error: error.message
+            });
+        });
+    });
 }
+
 
 export async function closeApplication(args) {
     const resolution = resolveApplication(args?.app_name);
