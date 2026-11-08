@@ -1,5 +1,6 @@
 
 import { toolRegistry } from "./registry.js";
+import { resolveApplication } from "../tools/applications.js";
 
 export async function executeTool(toolCall) {
     const name = toolCall.function?.name;
@@ -65,6 +66,20 @@ export async function executeTool(toolCall) {
     // Normalize filesystem paths before schema validation.
     args = normalizeFilesystemPath(name, args);
 
+    let appResolution = null;
+    if (
+        name === "open_application" &&
+        typeof args?.app_name === "string"
+    ) {
+        appResolution = resolveApplication(args.app_name);
+        if (appResolution.status === "resolved") {
+            args = {
+                ...args,
+                app_name: appResolution.canonical_id
+            };
+        }
+    }
+
     console.log("[STRANGE] Normalized tool args:", args);
     const validation = tool.schema.safeParse(args);
 
@@ -76,8 +91,40 @@ export async function executeTool(toolCall) {
         };
     }
 
+    if (name === "open_application") {
+        const resolution =
+            appResolution ?? resolveApplication(validation.data.app_name);
+
+        if (resolution.status !== "resolved") {
+            return {
+                success: false,
+                tool: name,
+                status: resolution.status,
+                requires_clarification: true,
+                error: resolution.message,
+                message: resolution.message,
+                candidates: resolution.candidates,
+                confidence: resolution.confidence
+            };
+        }
+    }
+
     try {
         const result = await tool.execute(validation.data);
+
+        if (result && result.requires_clarification) {
+            return {
+                success: false,
+                tool: name,
+                status: result.status,
+                requires_clarification: true,
+                error: result.error || result.message,
+                message: result.message,
+                candidates: result.candidates,
+                confidence: result.confidence,
+                result
+            };
+        }
 
         return {
             success: true,

@@ -28,6 +28,9 @@ Rules:
    another attempt is appropriate.
 7. Do not repeatedly call a tool with identical arguments
    after it has failed.
+8. If a tool returns requires_clarification: true (such as when multiple
+   applications match or confidence is low), do NOT guess or call the tool
+   again. Ask the user to clarify which application they meant.
 
 IMPORTANT FILESYSTEM PATH NORMALIZATION:
 
@@ -65,13 +68,14 @@ export async function askOllama(userMessage) {
     ];
 
     const executedTools = [];
+    let pendingClarificationMessage = null;
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
 
         const response = await ollama.chat({
             model: MODEL,
             messages,
-            tools: toolSchemas,
+            tools: pendingClarificationMessage ? [] : toolSchemas,
             stream: false
         });
 
@@ -84,7 +88,8 @@ export async function askOllama(userMessage) {
         if (toolCalls.length === 0) {
             return {
                 success: true,
-                answer: message.content,
+                answer: message.content || pendingClarificationMessage,
+                requires_clarification: Boolean(pendingClarificationMessage),
                 tool_calls: executedTools,
                 iterations: iteration + 1
             };
@@ -99,6 +104,11 @@ export async function askOllama(userMessage) {
                 arguments: toolCall.function.arguments,
                 result
             });
+
+            if (result?.requires_clarification) {
+                pendingClarificationMessage =
+                    result.message || result.error || "Please clarify which application you meant.";
+            }
 
             messages.push({
                 role: "tool",
