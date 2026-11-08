@@ -64,6 +64,9 @@ They are NOT part of the filesystem path.
 
 Before returning a filesystem tool call, ensure its path
 does not begin with "sandbox/".
+
+APPLICATION RULES:
+- When the user asks to open or launch an application (including by alias or role, such as "Open my code editor" -> {"app_name":"vscode"}), call open_application directly instead of list_applications.
 `;
 
 

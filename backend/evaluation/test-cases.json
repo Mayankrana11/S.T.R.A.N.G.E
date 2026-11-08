@@ -37,6 +37,15 @@
     }
   },
   {
+    "id": "filesystem_list_specific",
+    "category": "filesystem",
+    "prompt": "Show me the contents of the qwen35_benchmark directory.",
+    "expected_tool": "list_directory",
+    "expected_arguments": {
+      "path": "qwen35_benchmark"
+    }
+  },
+  {
     "id": "system_stats",
     "category": "system",
     "prompt": "Get my system statistics.",
@@ -51,12 +60,69 @@
     "expected_arguments": {}
   },
   {
-    "id": "application_open",
+    "id": "system_stats_voice",
+    "category": "system",
+    "prompt": "How much RAM is my computer using right now?",
+    "expected_tool": "get_system_stats",
+    "expected_arguments": {}
+  },
+  {
+    "id": "system_processes_voice",
+    "category": "system",
+    "prompt": "Which applications are currently running on my PC?",
+    "expected_tool": "get_running_processes",
+    "expected_arguments": {}
+  },
+  {
+    "id": "system_stats_natural",
+    "category": "system",
+    "prompt": "Check my computer's CPU and memory usage.",
+    "expected_tool": "get_system_stats",
+    "expected_arguments": {}
+  },
+  {
+    "id": "application_open_vscode",
     "category": "application",
     "prompt": "Open Visual Studio Code.",
     "expected_tool": "open_application",
     "expected_arguments": {
-      "app_name": "Visual Studio Code"
+      "app_name": "vscode"
+    }
+  },
+  {
+    "id": "application_open_vscode_alias",
+    "category": "application",
+    "prompt": "Launch VS Code for me.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "vscode"
+    }
+  },
+  {
+    "id": "application_open_vscode_voice",
+    "category": "application",
+    "prompt": "Open my code editor.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "vscode"
+    }
+  },
+  {
+    "id": "application_open_chrome",
+    "category": "application",
+    "prompt": "Open Google Chrome.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "chrome"
+    }
+  },
+  {
+    "id": "application_open_notepad",
+    "category": "application",
+    "prompt": "Launch Notepad.",
+    "expected_tool": "open_application",
+    "expected_arguments": {
+      "app_name": "notepad"
     }
   }
 ]
