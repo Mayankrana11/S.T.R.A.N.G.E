@@ -1,4 +1,3 @@
-
 import readline from "node:readline";
 
 const API_URL = "http://localhost:3000/chat";
@@ -8,6 +7,34 @@ const rl = readline.createInterface({
     output: process.stdout,
     prompt: "S.T.R.A.N.G.E> ",
 });
+
+function formatToolCallSummary(tool) {
+    const res = tool.result;
+    const inner = res?.result;
+    const status = res?.success === false ? "FAIL" : "OK";
+    let detail = "";
+
+    if (res?.success === false) {
+        const stage = inner?.failed_stage ? ` [stage: ${inner.failed_stage}]` : "";
+        detail = ` -> [${status}]${stage} ${res.error || inner?.error || "Unknown error"}`;
+    } else if (inner) {
+        if (inner.action === "desktop_click") {
+            detail = ` -> [${status}] ${inner.click_type} ${inner.button}-click "${inner.matched_label || inner.target}" at (${inner.x}, ${inner.y}) via ${inner.detection_method}`;
+        } else if (inner.action === "desktop_type") {
+            detail = ` -> [${status}] typed "${inner.text}"${inner.target ? ` into "${inner.target}"` : ""}`;
+        } else if (inner.action === "desktop_scroll") {
+            detail = ` -> [${status}] scrolled ${inner.direction} (${inner.amount})`;
+        } else if (inner.action === "desktop_control") {
+            detail = ` -> [${status}] ${inner.total_steps ?? 0} step(s) (${inner.status})`;
+        } else if (inner.action === "open_application") {
+            detail = ` -> [${status}] opened ${inner.application_name || inner.application}`;
+        } else if (inner.action === "close_application") {
+            detail = ` -> [${status}] closed ${inner.application_name || inner.application}`;
+        }
+    }
+
+    return `- ${tool.name}${detail}`;
+}
 
 async function sendMessage(message) {
     try {
@@ -27,6 +54,7 @@ async function sendMessage(message) {
         const data = await response.json();
 
         console.log("\n" + (
+            data.answer ??
             data.response ??
             data.message ??
             JSON.stringify(data, null, 2)
@@ -35,7 +63,12 @@ async function sendMessage(message) {
         if (data.tool_calls?.length) {
             console.log("\n[TOOLS]");
             for (const tool of data.tool_calls) {
-                console.log(`- ${tool.name}`);
+                console.log(formatToolCallSummary(tool));
+                if (tool.result?.result?.steps_executed?.length) {
+                    for (const step of tool.result.result.steps_executed) {
+                        console.log(`    [Step ${step.step}] ${step.action}: ${step.outcome} (${step.thought || ""})`);
+                    }
+                }
             }
         }
 
