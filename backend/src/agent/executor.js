@@ -1,6 +1,19 @@
-
 import { toolRegistry } from "./registry.js";
 import { resolveApplication } from "../tools/applications.js";
+import { recordActiveApplicationContext } from "../tools/desktop.js";
+
+const DESKTOP_APP_TOOLS = new Set([
+    "desktop_click",
+    "left_click",
+    "right_click",
+    "double_click",
+    "desktop_scroll",
+    "desktop_type",
+    "desktop_press_key",
+    "desktop_inspect",
+    "desktop_control",
+    "take_screenshot"
+]);
 
 export async function executeTool(toolCall) {
     const name = toolCall.function?.name;
@@ -78,12 +91,25 @@ export async function executeTool(toolCall) {
                 app_name: appResolution.canonical_id
             };
         }
+    } else if (
+        DESKTOP_APP_TOOLS.has(name) &&
+        typeof args?.app_name === "string" &&
+        args.app_name.trim()
+    ) {
+        const desktopAppRes = resolveApplication(args.app_name);
+        if (desktopAppRes.status === "resolved") {
+            args = {
+                ...args,
+                app_name: desktopAppRes.canonical_id
+            };
+        }
     }
 
-    console.log("[STRANGE] Normalized tool args:", args);
+    console.log(`[STRANGE] Executing tool "${name}" with args:`, args);
     const validation = tool.schema.safeParse(args);
 
     if (!validation.success) {
+        console.error(`[STRANGE] [FAIL:VALIDATION] Tool "${name}" invalid arguments:`, validation.error.issues);
         return {
             success: false,
             error: "Invalid arguments",
@@ -112,6 +138,10 @@ export async function executeTool(toolCall) {
     try {
         const result = await tool.execute(validation.data);
 
+        if (name === "open_application" && result?.success && result?.canonical_id) {
+            recordActiveApplicationContext(result.canonical_id);
+        }
+
         if (result && result.requires_clarification) {
             return {
                 success: false,
@@ -127,6 +157,10 @@ export async function executeTool(toolCall) {
         }
 
         if (result && result.success === false) {
+            console.error(
+                `[STRANGE] [FAIL:TOOL] Tool "${name}" failed:`,
+                result.error || result.message
+            );
             return {
                 success: false,
                 tool: name,
@@ -141,6 +175,7 @@ export async function executeTool(toolCall) {
             result
         };
     } catch (error) {
+        console.error(`[STRANGE] [FAIL:EXCEPTION] Tool "${name}" threw error:`, error.message);
         return {
             success: false,
             tool: name,
