@@ -1,12 +1,83 @@
+import dotenv from "dotenv";
+import ollama from "ollama";
 import readline from "node:readline";
 
-const API_URL = "http://localhost:3000/chat";
+dotenv.config();
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: "S.T.R.A.N.G.E> ",
-});
+const BASE_URL = `http://localhost:${process.env.PORT || 3000}`;
+const API_URL = `${BASE_URL}/chat`;
+
+async function queryLocalOllamaModel() {
+    dotenv.config({ override: true });
+    const configuredModel = process.env.OLLAMA_MODEL?.trim();
+    const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+
+    try {
+        const [psRes, listRes] = await Promise.all([
+            ollama.ps().catch(() => ({ models: [] })),
+            ollama.list().catch(() => ({ models: [] }))
+        ]);
+
+        const runningModels = psRes?.models ?? [];
+        const installedModels = listRes?.models ?? [];
+
+        const targetName =
+            configuredModel ||
+            runningModels[0]?.model ||
+            runningModels[0]?.name ||
+            installedModels[0]?.model ||
+            installedModels[0]?.name ||
+            "unknown";
+
+        const matchedRunning = runningModels.find(
+            (m) => m.name === targetName || m.model === targetName
+        );
+        const matchedInstalled = installedModels.find(
+            (m) => m.name === targetName || m.model === targetName
+        );
+        const details = matchedRunning?.details || matchedInstalled?.details || {};
+
+        return {
+            model: matchedInstalled?.model || matchedRunning?.model || targetName,
+            parameter_size: details.parameter_size || null,
+            quantization_level: details.quantization_level || null,
+            family: details.family || null,
+            loaded_in_vram: Boolean(matchedRunning),
+            host
+        };
+    } catch {
+        return {
+            model: configuredModel || "unknown",
+            parameter_size: null,
+            quantization_level: null,
+            family: null,
+            loaded_in_vram: false,
+            host
+        };
+    }
+}
+
+async function resolveCurrentModelBanner() {
+    try {
+        const res = await fetch(BASE_URL);
+        if (res.ok) {
+            const data = await res.json();
+            if (data?.ollama?.model) {
+                return data.ollama;
+            }
+        }
+    } catch {
+        // Backend not reachable yet; query local Ollama directly
+    }
+
+    return queryLocalOllamaModel();
+}
+
+function formatModelLabel(info) {
+    if (!info || !info.model) return "unknown";
+    const meta = [info.parameter_size, info.quantization_level].filter(Boolean).join(", ");
+    return meta ? `${info.model} (${meta})` : info.model;
+}
 
 function formatToolCallSummary(tool) {
     const res = tool.result;
@@ -53,12 +124,18 @@ async function sendMessage(message) {
 
         const data = await response.json();
 
-        console.log("\n" + (
+        if (data.model) {
+            console.log(`\n[MODEL: ${data.model}]`);
+        } else {
+            console.log();
+        }
+
+        console.log(
             data.answer ??
             data.response ??
             data.message ??
             JSON.stringify(data, null, 2)
-        ));
+        );
 
         if (data.tool_calls?.length) {
             console.log("\n[TOOLS]");
@@ -81,11 +158,22 @@ async function sendMessage(message) {
     }
 }
 
+const modelInfo = await resolveCurrentModelBanner();
+
 console.log("==================================");
 console.log("       S.T.R.A.N.G.E. TERMINAL");
 console.log("==================================");
+console.log(`Ollama Model : ${formatModelLabel(modelInfo)}`);
+console.log(`Ollama Host  : ${modelInfo.host}`);
+console.log("----------------------------------");
 console.log("Type a command or question.");
 console.log("Type 'exit' to quit.\n");
+
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: "S.T.R.A.N.G.E> ",
+});
 
 rl.prompt();
 

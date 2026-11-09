@@ -13,7 +13,14 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || process.env.OLLAMA_MODEL || "qwen3.5:4b";
+function getVisionModel() {
+    dotenv.config({ override: true });
+    return (
+        process.env.OLLAMA_VISION_MODEL?.trim() ||
+        process.env.OLLAMA_MODEL?.trim() ||
+        "qwen3.5:4b"
+    );
+}
 
 const NATIVE_DIR = path.resolve(__dirname, "./native");
 const NATIVE_CS_PATH = path.join(NATIVE_DIR, "StrangeDesktopNative.cs");
@@ -509,7 +516,7 @@ If none of the elements match "${target}", return JSON:
     try {
         const t0 = Date.now();
         const response = await ollama.chat({
-            model: VISION_MODEL,
+            model: getVisionModel(),
             think: false,
             format: "json",
             messages: [{ role: "user", content: prompt }]
@@ -723,7 +730,7 @@ Respond ONLY with valid JSON in this exact format:
     try {
         const llmStart = Date.now();
         const response = await ollama.chat({
-            model: VISION_MODEL,
+            model: getVisionModel(),
             think: false,
             format: "json",
             messages: [
@@ -1466,7 +1473,7 @@ Return JSON with:
 }`;
 
             const response = await ollama.chat({
-                model: VISION_MODEL,
+                model: getVisionModel(),
                 think: false,
                 format: "json",
                 messages: [
@@ -1648,7 +1655,7 @@ Return ONLY valid JSON with this structure:
 
                 const llmStart = Date.now();
                 const response = await ollama.chat({
-                    model: VISION_MODEL,
+                    model: getVisionModel(),
                     think: false,
                     format: "json",
                     messages: [

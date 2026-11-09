@@ -6,7 +6,61 @@ import { executeTool } from "./executor.js";
 
 dotenv.config();
 
-const MODEL = process.env.OLLAMA_MODEL || "qwen3.5:4b";
+let cachedResolvedModel = null;
+
+export async function getActiveModelInfo() {
+    dotenv.config({ override: true });
+    const configuredModel = process.env.OLLAMA_MODEL?.trim();
+    const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+
+    try {
+        const [psRes, listRes] = await Promise.all([
+            ollama.ps().catch(() => ({ models: [] })),
+            ollama.list().catch(() => ({ models: [] }))
+        ]);
+
+        const runningModels = psRes?.models ?? [];
+        const installedModels = listRes?.models ?? [];
+
+        // Match configured model against running/installed models, or dynamically pick running/first installed local model
+        const targetName =
+            configuredModel ||
+            runningModels[0]?.model ||
+            runningModels[0]?.name ||
+            installedModels[0]?.model ||
+            installedModels[0]?.name ||
+            "unknown";
+
+        const matchedRunning = runningModels.find(
+            (m) => m.name === targetName || m.model === targetName
+        );
+        const matchedInstalled = installedModels.find(
+            (m) => m.name === targetName || m.model === targetName
+        );
+        const details = matchedRunning?.details || matchedInstalled?.details || {};
+
+        cachedResolvedModel = matchedInstalled?.model || matchedRunning?.model || targetName;
+
+        return {
+            model: cachedResolvedModel,
+            parameter_size: details.parameter_size || null,
+            quantization_level: details.quantization_level || null,
+            family: details.family || null,
+            loaded_in_vram: Boolean(matchedRunning),
+            host
+        };
+    } catch {
+        const fallback = configuredModel || cachedResolvedModel || "unknown";
+        return {
+            model: fallback,
+            parameter_size: null,
+            quantization_level: null,
+            family: null,
+            loaded_in_vram: false,
+            host
+        };
+    }
+}
 
 const MAX_ITERATIONS = Number(
     process.env.MAX_TOOL_ITERATIONS || 12
@@ -84,16 +138,22 @@ export async function askOllama(userMessage) {
 
     const executedTools = [];
     let pendingClarificationMessage = null;
+    const { model: activeModel } = await getActiveModelInfo();
+    let usedModel = activeModel;
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
 
         const response = await ollama.chat({
-            model: MODEL,
+            model: activeModel,
             think: process.env.OLLAMA_THINK === "true",
             messages,
             tools: pendingClarificationMessage ? [] : toolSchemas,
             stream: false
         });
+
+        if (response?.model) {
+            usedModel = response.model;
+        }
 
         const message = response.message;
 
@@ -104,6 +164,7 @@ export async function askOllama(userMessage) {
         if (toolCalls.length === 0) {
             return {
                 success: true,
+                model: usedModel,
                 answer: message.content || pendingClarificationMessage,
                 requires_clarification: Boolean(pendingClarificationMessage),
                 tool_calls: executedTools,
@@ -140,6 +201,7 @@ export async function askOllama(userMessage) {
 
     return {
         success: false,
+        model: usedModel,
         answer: "Maximum tool iterations reached.",
         tool_calls: executedTools
     };
