@@ -1,4 +1,3 @@
-
 import ollama from "ollama";
 import dotenv from "dotenv";
 
@@ -10,7 +9,7 @@ dotenv.config();
 const MODEL = process.env.OLLAMA_MODEL || "qwen3.5:4b";
 
 const MAX_ITERATIONS = Number(
-    process.env.MAX_TOOL_ITERATIONS || 8
+    process.env.MAX_TOOL_ITERATIONS || 12
 );
 
 const SYSTEM_PROMPT = `
@@ -58,6 +57,17 @@ APPLICATION LAUNCHING AND CLOSING:
 - Supported applications include Visual Studio Code (vscode), Visual Studio (visual_studio), Google Chrome (chrome), Notepad (notepad), Calculator (calculator), Paint (paint), Steam (steam), Discord (discord), and Spotify (spotify).
 - When the user asks to open or launch an application (including by alias or role such as "my code editor" -> "vscode"), call open_application directly instead of list_applications.
 - When the user asks to close, quit, exit, or terminate an application, call close_application directly.
+
+IN-APPLICATION DESKTOP CONTROL (WINDOWS UI AUTOMATION + QWEN VISION):
+- When the user asks to interact inside an application (such as clicking buttons, selecting playlists, enabling shuffle, clicking play, typing into a search bar, scrolling, downloading a game in Steam, or opening a video/short on YouTube):
+  1. If the application is not open yet (e.g. "open spotify and play my playlist 'songs' on shuffle" or "open steam and download X"), FIRST call open_application (or browser_navigate for a website URL like "https://www.youtube.com").
+  2. Next, perform the in-application actions sequentially:
+     - Use desktop_click for clicking a specific button, playlist, link, or UI element (supports button: "left" | "right", click_type: "single" | "double").
+     - Use desktop_type for typing into a search bar or input field (e.g. searching for a playlist, game, or YouTube channel).
+     - Use desktop_scroll for scrolling "up", "down", "left", or "right".
+     - Use desktop_press_key for keyboard shortcuts (e.g. "Enter", "Space", "ctrl+k", "ctrl+l").
+     - Use desktop_control when you want the vision/UIA controller to autonomously step through a multi-step in-app goal (e.g. goal: "go to playlists, select 'songs', click shuffle, and click play", app_name: "spotify").
+  3. Execute UI actions sequentially one step at a time and check the returned tool result before proceeding.
 `;
 
 export async function askOllama(userMessage) {
@@ -79,6 +89,7 @@ export async function askOllama(userMessage) {
 
         const response = await ollama.chat({
             model: MODEL,
+            think: process.env.OLLAMA_THINK === "true",
             messages,
             tools: pendingClarificationMessage ? [] : toolSchemas,
             stream: false
@@ -100,7 +111,12 @@ export async function askOllama(userMessage) {
             };
         }
 
+        // Execute tool calls strictly sequentially one after another
         for (const toolCall of toolCalls) {
+            console.log(
+                `[STRANGE:AGENT] [Step ${iteration + 1}/${MAX_ITERATIONS}] Tool call -> ${toolCall.function?.name}`,
+                toolCall.function?.arguments
+            );
 
             const result = await executeTool(toolCall);
 
