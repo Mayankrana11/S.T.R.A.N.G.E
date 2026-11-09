@@ -843,9 +843,9 @@ function getCandidateTargets(app) {
             ];
         case "chrome":
             return [
-                { executable: path.join(PROGRAM_FILES, "Google", "Chrome", "Application", "chrome.exe"), args: [] },
-                { executable: path.join(PROGRAM_FILES_X86, "Google", "Chrome", "Application", "chrome.exe"), args: [] },
-                { executable: path.join(LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"), args: [] }
+                { executable: path.join(PROGRAM_FILES, "Google", "Chrome", "Application", "chrome.exe"), args: ["--force-renderer-accessibility"] },
+                { executable: path.join(PROGRAM_FILES_X86, "Google", "Chrome", "Application", "chrome.exe"), args: ["--force-renderer-accessibility"] },
+                { executable: path.join(LOCALAPPDATA, "Google", "Chrome", "Application", "chrome.exe"), args: ["--force-renderer-accessibility"] }
             ];
         case "visual_studio":
             return [
