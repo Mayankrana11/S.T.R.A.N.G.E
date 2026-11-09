@@ -1,6 +1,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { captureDesktopScreenshot } from "./desktop.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -124,11 +125,6 @@ Get-Process |
     }
 }
 
-export async function takeScreenshot() {
-    return {
-        success: false,
-        screenshot_available: false,
-        simulated: false,
-        message: "Screenshot capture has not been implemented yet."
-    };
+export async function takeScreenshot(args = {}) {
+    return captureDesktopScreenshot(args);
 }
