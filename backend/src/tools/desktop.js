@@ -106,6 +106,15 @@ export const APP_DESKTOP_PROFILES = {
         titleKeywords: ["visual studio"],
         isElectronOrCef: false,
         uiHints: "Microsoft Visual Studio IDE UI: Top menu and toolbar (Start/Run button), center code editor, right Solution Explorer."
+    },
+    whatsapp: {
+        id: "whatsapp",
+        name: "WhatsApp",
+        processNames: ["WhatsApp.Root", "WhatsApp", "ApplicationFrameHost"],
+        titleKeywords: ["whatsapp"],
+        isElectronOrCef: false,
+        uiHints:
+            "WhatsApp Desktop (Microsoft Store) UI: Left pane has chat list and a search bar at the top ('Search or start a new chat'); far-left sidebar has Chats, Calls, Status, and Settings icons; right pane shows the active conversation with message history and the 'Type a message' input box at the bottom."
     }
 };
 

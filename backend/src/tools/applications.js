@@ -119,6 +119,20 @@ export const APPLICATION_REGISTRY = [
             "spotify player",
             "music player"
         ]
+    },
+    {
+        id: "whatsapp",
+        name: "WhatsApp",
+        executable: "whatsapp",
+        aliases: [
+            "whatsapp",
+            "whats app",
+            "whatsapp messenger",
+            "whatsapp desktop",
+            "microsoft whatsapp",
+            "whatsapp app",
+            "wa"
+        ]
     }
 ];
 
@@ -774,6 +788,64 @@ function findDiscordExecutables() {
     return candidates;
 }
 
+function findWhatsAppTargets() {
+    const candidates = [];
+    const explorerPath = pathExists(path.join(SYSTEM_ROOT, "explorer.exe"))
+        ? path.join(SYSTEM_ROOT, "explorer.exe")
+        : "C:\\Windows\\explorer.exe";
+
+    // 1. Check Microsoft Store WhatsApp package in %LOCALAPPDATA%\Packages
+    // Official Store PackageFamilyName: 5319275A.WhatsAppDesktop_cv1g1gvanyjgm (AppID: !App)
+    if (LOCALAPPDATA) {
+        const packagesDir = path.join(LOCALAPPDATA, "Packages");
+        const defaultStoreFamily = "5319275A.WhatsAppDesktop_cv1g1gvanyjgm";
+
+        if (pathExists(path.join(packagesDir, defaultStoreFamily))) {
+            candidates.push({
+                executable: explorerPath,
+                args: [`shell:AppsFolder\\${defaultStoreFamily}!App`]
+            });
+        } else {
+            try {
+                if (fs.existsSync(packagesDir)) {
+                    const whatsappPkg = fs
+                        .readdirSync(packagesDir)
+                        .find(name => name.toLowerCase().startsWith("5319275a.whatsappdesktop_"));
+
+                    if (whatsappPkg) {
+                        candidates.push({
+                            executable: explorerPath,
+                            args: [`shell:AppsFolder\\${whatsappPkg}!App`]
+                        });
+                    }
+                }
+            } catch {
+                // Ignore directory read errors and continue to fallbacks
+            }
+        }
+
+        // 2. WindowsApps execution alias or standalone desktop installer paths
+        candidates.push(
+            {
+                executable: path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "WhatsApp.exe"),
+                args: []
+            },
+            {
+                executable: path.join(LOCALAPPDATA, "WhatsApp", "WhatsApp.exe"),
+                args: []
+            }
+        );
+    }
+
+    // 3. Fallback to Microsoft Store shell:AppsFolder AppUserModelId via explorer.exe
+    candidates.push({
+        executable: explorerPath,
+        args: ["shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App"]
+    });
+
+    return candidates;
+}
+
 function queryRegistryValue(keyPath, valueName) {
     try {
         const args = valueName
@@ -891,6 +963,8 @@ function getCandidateTargets(app) {
                 { executable: path.join(SYSTEM_ROOT, "System32", "mspaint.exe"), args: [] },
                 { executable: path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "mspaint.exe"), args: [] }
             ];
+        case "whatsapp":
+            return findWhatsAppTargets();
         default:
             return [];
     }
@@ -1005,7 +1079,8 @@ export async function closeApplication(args) {
         paint: ["mspaint.exe"],
         steam: ["steam.exe", "steamwebhelper.exe"],
         discord: ["Discord.exe"],
-        spotify: ["Spotify.exe"]
+        spotify: ["Spotify.exe"],
+        whatsapp: ["WhatsApp.Root.exe", "WhatsApp.exe"]
     };
 
     const processes = processMap[app.id];
