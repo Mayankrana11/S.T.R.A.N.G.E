@@ -8,9 +8,14 @@ import { fileURLToPath } from "node:url";
 import { toolSchemas } from "../src/agent/registry.js";
 import { resolveApplication } from "../src/tools/applications.js";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const BACKEND_ENV_PATH = path.resolve(__dirname, "../.env");
 
-const MODEL = process.env.OLLAMA_MODEL || "qwen3:8b";
+dotenv.config({ path: BACKEND_ENV_PATH, override: true });
+
+const MODEL = process.env.OLLAMA_MODEL || "qwen3.5:4b";
+const VISION_MODEL = process.env.OLLAMA_VISION_MODEL || "qwen2.5vl:3b";
 
 const DATASET_PATH = path.resolve(
     "evaluation/test-cases.json"
