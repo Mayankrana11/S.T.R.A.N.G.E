@@ -1,64 +1,136 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import ollama from "ollama";
 import dotenv from "dotenv";
 
 import { toolSchemas } from "./registry.js";
 import { executeTool } from "./executor.js";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const BACKEND_ENV_PATH = path.resolve(__dirname, "../../.env");
+
+dotenv.config({ path: BACKEND_ENV_PATH, override: true });
 
 let cachedResolvedModel = null;
+let cachedResolvedVisionModel = null;
+
+function normalizeModelTag(rawName) {
+    if (!rawName || typeof rawName !== "string") return "";
+    const trimmed = rawName.trim();
+    // Normalize e.g. "qwen2.5vl-3b" -> "qwen2.5vl:3b" if user wrote hyphen before size tag
+    if (!trimmed.includes(":") && /-[0-9]+(\.[0-9]+)?b$/i.test(trimmed)) {
+        return trimmed.replace(/-([0-9]+(?:\.[0-9]+)?b)$/i, ":$1");
+    }
+    return trimmed;
+}
+
+function findMatchingOllamaModel(targetName, models = []) {
+    if (!targetName || !Array.isArray(models)) return null;
+    const rawLower = targetName.trim().toLowerCase();
+    const normLower = normalizeModelTag(targetName).toLowerCase();
+    const hyphenLower = normLower.replace(/:([0-9]+(?:\.[0-9]+)?b.*)$/i, "-$1");
+
+    return (
+        models.find((m) => {
+            const name = (m.name || "").toLowerCase();
+            const model = (m.model || "").toLowerCase();
+            return (
+                name === rawLower ||
+                model === rawLower ||
+                name === normLower ||
+                model === normLower ||
+                name === hyphenLower ||
+                model === hyphenLower
+            );
+        }) || null
+    );
+}
 
 export async function getActiveModelInfo() {
-    dotenv.config({ override: true });
-    const configuredModel = process.env.OLLAMA_MODEL?.trim();
-    const configuredVisionModel = process.env.OLLAMA_VISION_MODEL?.trim() || configuredModel;
+    dotenv.config({ path: BACKEND_ENV_PATH, override: true });
+    const configuredModel = normalizeModelTag(process.env.OLLAMA_MODEL) || "qwen3.5:4b";
+    const configuredVisionModel =
+        normalizeModelTag(process.env.OLLAMA_VISION_MODEL) || "qwen2.5vl:3b";
     const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
 
     try {
-        const [psRes, listRes] = await Promise.all([
-            ollama.ps().catch(() => ({ models: [] })),
-            ollama.list().catch(() => ({ models: [] }))
-        ]);
+        let runningModels = [];
+        let installedModels = [];
 
-        const runningModels = psRes?.models ?? [];
-        const installedModels = listRes?.models ?? [];
+        for (let attempt = 0; attempt < 4; attempt++) {
+            const [psRes, listRes] = await Promise.all([
+                ollama.ps().catch(() => ({ models: [] })),
+                ollama.list().catch(() => ({ models: [] }))
+            ]);
 
-        const targetName =
+            runningModels = psRes?.models ?? [];
+            installedModels = listRes?.models ?? [];
+
+            if (installedModels.length > 0 || runningModels.length > 0) {
+                break;
+            }
+            if (attempt < 3) {
+                await new Promise((r) => setTimeout(r, 350));
+            }
+        }
+
+        const targetMainName =
             configuredModel ||
             runningModels[0]?.model ||
             runningModels[0]?.name ||
             installedModels[0]?.model ||
             installedModels[0]?.name ||
-            "unknown";
+            "qwen3.5:4b";
 
-        const matchedRunning = runningModels.find(
-            (m) => m.name === targetName || m.model === targetName
-        );
-        const matchedInstalled = installedModels.find(
-            (m) => m.name === targetName || m.model === targetName
-        );
-        const details = matchedRunning?.details || matchedInstalled?.details || {};
+        const matchedMainRunning = findMatchingOllamaModel(targetMainName, runningModels);
+        const matchedMainInstalled = findMatchingOllamaModel(targetMainName, installedModels);
+        const mainDetails = matchedMainRunning?.details || matchedMainInstalled?.details || {};
 
-        cachedResolvedModel = matchedInstalled?.model || matchedRunning?.model || targetName;
+        const targetVisionName = configuredVisionModel || targetMainName;
+        const matchedVisionRunning = findMatchingOllamaModel(targetVisionName, runningModels);
+        const matchedVisionInstalled = findMatchingOllamaModel(targetVisionName, installedModels);
+        const visionDetails =
+            matchedVisionRunning?.details || matchedVisionInstalled?.details || {};
+
+        cachedResolvedModel =
+            matchedMainInstalled?.model ||
+            matchedMainRunning?.model ||
+            targetMainName;
+
+        cachedResolvedVisionModel =
+            matchedVisionInstalled?.model ||
+            matchedVisionRunning?.model ||
+            targetVisionName;
 
         return {
             model: cachedResolvedModel,
-            vision_model: configuredVisionModel || cachedResolvedModel,
-            parameter_size: details.parameter_size || null,
-            quantization_level: details.quantization_level || null,
-            family: details.family || null,
-            loaded_in_vram: Boolean(matchedRunning),
+            parameter_size: mainDetails.parameter_size || null,
+            quantization_level: mainDetails.quantization_level || null,
+            family: mainDetails.family || null,
+            loaded_in_vram: Boolean(matchedMainRunning),
+            vision_model: cachedResolvedVisionModel,
+            vision_parameter_size: visionDetails.parameter_size || null,
+            vision_quantization_level: visionDetails.quantization_level || null,
+            vision_family: visionDetails.family || null,
+            vision_loaded_in_vram: Boolean(matchedVisionRunning),
             host
         };
     } catch {
-        const fallback = configuredModel || cachedResolvedModel || "unknown";
+        const fallbackMain = configuredModel || cachedResolvedModel || "qwen3.5:4b";
+        const fallbackVision =
+            configuredVisionModel || cachedResolvedVisionModel || "qwen2.5vl:3b";
         return {
-            model: fallback,
-            vision_model: configuredVisionModel || fallback,
+            model: fallbackMain,
             parameter_size: null,
             quantization_level: null,
             family: null,
             loaded_in_vram: false,
+            vision_model: fallbackVision,
+            vision_parameter_size: null,
+            vision_quantization_level: null,
+            vision_family: null,
+            vision_loaded_in_vram: false,
             host
         };
     }
@@ -74,11 +146,11 @@ S.T.R.A.N.G.E stands for Smart Task Reasoning and Autonomous Navigation for Gene
 You can use tools to interact with the computer.
 
 Rules:
-1. Use tools when the user requests an action.
-2. Do not invent tool names.
-3. Do not claim an action succeeded without tool results.
-4. Use the correct tool for the requested task.
-5. If the user asks a normal question, answer normally.
+1. ONLY use tools when the user explicitly requests a computer action (opening/closing apps, interacting with desktop UI, reading/writing sandbox files, checking system stats/processes, browsing URLs, or inspecting the screen).
+2. For greetings (such as "hello", "hi", "hey", "good morning"), small talk, thanks, or general knowledge questions that do not require computer interaction, NEVER call any tool (and NEVER call desktop_inspect) — respond directly in normal plain text.
+3. Do not invent tool names.
+4. Do not claim an action succeeded without tool results.
+5. Use the correct tool for the requested task.
 6. If a tool fails, inspect the error and decide whether
    another attempt is appropriate.
 7. Do not repeatedly call a tool with identical arguments
@@ -180,6 +252,27 @@ function compactToolResultForModel(toolName, rawResult) {
         };
     }
 
+    if (toolName === "desktop_inspect") {
+        return {
+            success: rawResult.success,
+            tool: toolName,
+            error: rawResult.error || undefined,
+            result: {
+                success: inner.success,
+                action: inner.action,
+                model: inner.model || undefined,
+                vision_model: inner.vision_model || undefined,
+                window_title: inner.window_title || undefined,
+                process_name: inner.process_name || undefined,
+                vision_analysis: inner.vision_analysis || undefined,
+                uia_elements_count: Array.isArray(inner.uia_elements_sample)
+                    ? inner.uia_elements_sample.length
+                    : 0,
+                timings_ms: inner.timings_ms
+            }
+        };
+    }
+
     return rawResult;
 }
 
@@ -261,6 +354,21 @@ function coalesceToolCalls(toolCalls) {
     return coalesced;
 }
 
+function isConversationalNoToolPrompt(userMessage) {
+    const cleaned = String(userMessage || "").trim();
+    if (!cleaned) return true;
+    return /^(hi|hello|hey|yo|sup|hola|namaste|greetings|good\s+(morning|afternoon|evening|night)|how\s+are\s+you(\s+doing)?|how'?s\s+it\s+going|what'?s\s+up|who\s+are\s+you|what\s+are\s+you|what\s+is\s+your\s+name|what\s+does\s+s\.?t\.?r\.?a\.?n\.?g\.?e\.?\s+stand\s+for|thanks|thank\s+you|thx|ok|okay|cool|nice|great|awesome|bye|goodbye|see\s+ya)(\s+strange|\s+there)?[!?.~\s]*$/i.test(
+        cleaned
+    );
+}
+
+function isExplicitScreenInspectRequest(userMessage) {
+    const cleaned = String(userMessage || "").trim();
+    return /\b(inspect|screen|screenshot|capture|window|visible|see|look|watch|display|showing|what\s+is\s+on|what'?s\s+on|describe|ui|button|element|ocr|vision)\b/i.test(
+        cleaned
+    );
+}
+
 export async function askOllama(userMessage) {
     const messages = [
         {
@@ -276,11 +384,23 @@ export async function askOllama(userMessage) {
     const executedTools = [];
     let pendingClarificationMessage = null;
     let pendingConfirmationMessage = null;
-    const { model: activeModel } = await getActiveModelInfo();
-    let usedModel = activeModel;
+    const modelInfo = await getActiveModelInfo();
+    const activeModel = modelInfo.model;
+    let mainModelUsed = activeModel;
+    let visionModelUsed = null;
+    const modelsUsed = [];
+    const conversationalOnly = isConversationalNoToolPrompt(userMessage);
 
     for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
-        const stopTools = Boolean(pendingClarificationMessage || pendingConfirmationMessage);
+        const stopTools = Boolean(
+            conversationalOnly ||
+            pendingClarificationMessage ||
+            pendingConfirmationMessage
+        );
+
+        console.log(
+            `[STRANGE:AGENT] [Step ${iteration + 1}/${MAX_ITERATIONS}] [MODEL: ${activeModel}] Processing prompt...`
+        );
 
         const response = await ollama.chat({
             model: activeModel,
@@ -294,19 +414,53 @@ export async function askOllama(userMessage) {
         });
 
         if (response?.model) {
-            usedModel = response.model;
+            mainModelUsed = response.model;
+        }
+        if (!modelsUsed.includes(mainModelUsed)) {
+            modelsUsed.push(mainModelUsed);
         }
 
-        const message = response.message;
+        let message = response.message;
+        const rawToolCalls = message.tool_calls ?? [];
+
+        // Guard against hallucinated desktop_inspect calls when the user did not ask to inspect the screen
+        const filteredRawToolCalls =
+            iteration === 0 && !isExplicitScreenInspectRequest(userMessage)
+                ? rawToolCalls.filter((tc) => tc?.function?.name !== "desktop_inspect")
+                : rawToolCalls;
+
+        if (
+            iteration === 0 &&
+            rawToolCalls.length > 0 &&
+            filteredRawToolCalls.length === 0 &&
+            !message.content
+        ) {
+            const directResponse = await ollama.chat({
+                model: activeModel,
+                think: process.env.OLLAMA_THINK === "true",
+                options: { temperature: 0 },
+                messages,
+                tools: [],
+                stream: false
+            });
+            if (directResponse?.model) {
+                mainModelUsed = directResponse.model;
+            }
+            message = directResponse.message;
+        }
+
         messages.push(message);
 
-        const rawToolCalls = message.tool_calls ?? [];
-        const toolCalls = coalesceToolCalls(rawToolCalls);
+        const toolCalls = coalesceToolCalls(filteredRawToolCalls);
 
         if (toolCalls.length === 0) {
+            const effectiveModel = visionModelUsed || mainModelUsed;
             return {
                 success: true,
-                model: usedModel,
+                model: effectiveModel,
+                main_model: mainModelUsed,
+                vision_model: visionModelUsed,
+                models_used: modelsUsed,
                 answer: message.content || pendingConfirmationMessage || pendingClarificationMessage,
                 requires_clarification: Boolean(pendingClarificationMessage),
                 requires_confirmation: Boolean(pendingConfirmationMessage),
@@ -318,15 +472,34 @@ export async function askOllama(userMessage) {
         // Execute tool calls strictly sequentially one after another
         for (const toolCall of toolCalls) {
             console.log(
-                `[STRANGE:AGENT] [Step ${iteration + 1}/${MAX_ITERATIONS}] Tool call -> ${toolCall.function?.name}`,
+                `[STRANGE:AGENT] [Step ${iteration + 1}/${MAX_ITERATIONS}] [MODEL: ${mainModelUsed}] Tool call -> ${toolCall.function?.name}`,
                 toolCall.function?.arguments
             );
 
             const result = await executeTool(toolCall);
+            const innerResult = result?.result;
+            const toolVisionModel =
+                innerResult?.vision_model ||
+                result?.vision_model ||
+                (Number(innerResult?.timings_ms?.vision_inference_ms || 0) > 0
+                    ? modelInfo.vision_model
+                    : null);
+
+            if (toolVisionModel) {
+                visionModelUsed = toolVisionModel;
+                if (!modelsUsed.includes(toolVisionModel)) {
+                    modelsUsed.push(toolVisionModel);
+                }
+                console.log(
+                    `[STRANGE:AGENT] [Step ${iteration + 1}/${MAX_ITERATIONS}] [MODEL: ${toolVisionModel}] Vision inference executed during ${toolCall.function?.name}`
+                );
+            }
 
             executedTools.push({
                 name: toolCall.function.name,
                 arguments: toolCall.function.arguments,
+                model: toolVisionModel || mainModelUsed,
+                vision_model: toolVisionModel || null,
                 result
             });
 
@@ -348,9 +521,13 @@ export async function askOllama(userMessage) {
         }
     }
 
+    const effectiveModel = visionModelUsed || mainModelUsed;
     return {
         success: false,
-        model: usedModel,
+        model: effectiveModel,
+        main_model: mainModelUsed,
+        vision_model: visionModelUsed,
+        models_used: modelsUsed,
         answer: "Maximum tool iterations reached.",
         tool_calls: executedTools
     };
