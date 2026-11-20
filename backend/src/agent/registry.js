@@ -778,7 +778,7 @@ export const toolSchemas = [
         type: "function",
         function: {
             name: "desktop_inspect",
-            description: "Inspect the current application window using Windows UI Automation, local OCR, and optional Qwen vision to see what buttons, playlists, or elements are on screen.",
+            description: "Visually inspect an application window or the desktop screen using Qwen vision ONLY when the user explicitly asks to inspect the screen or asks what is visible on screen. NEVER call this tool for greetings, general conversation, or before other desktop actions.",
             parameters: {
                 type: "object",
                 properties: {
@@ -788,9 +788,10 @@ export const toolSchemas = [
                     },
                     question: {
                         type: "string",
-                        description: "Optional visual question about the screen."
+                        description: "The visual question about what is currently visible on the screen."
                     }
-                }
+                },
+                required: ["question"]
             }
         }
     },
