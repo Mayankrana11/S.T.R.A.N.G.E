@@ -31,21 +31,79 @@ import {
     rightClick,
     doubleClick,
     moveMouse,
+    dragAndDrop,
     scrollDesktop,
     typeText,
     pressKey,
     inspectDesktopUI,
-    desktopControl
+    desktopControl,
+    executeActionSequence,
+    cancelDesktopSequence
 } from "../tools/desktop.js";
 
 const clickSchema = z.object({
     target: z.string().optional(),
     app_name: z.string().optional(),
+    role: z.string().optional(),
     button: z.enum(["left", "right", "middle"]).optional(),
     click_type: z.enum(["single", "double"]).optional(),
     x: z.number().optional(),
     y: z.number().optional(),
-    mode: z.enum(["auto", "uia", "vision"]).optional()
+    mode: z.enum(["auto", "uia", "ocr", "vision"]).optional(),
+    confirm_destructive: z.boolean().optional()
+});
+
+const actionStepSchema = z.object({
+    action: z.enum([
+        "move_mouse",
+        "move",
+        "click",
+        "mouse_click",
+        "left_click",
+        "right_click",
+        "middle_click",
+        "double_click",
+        "drag_and_drop",
+        "drag",
+        "mouse_drag",
+        "scroll",
+        "mouse_scroll",
+        "type_text",
+        "type",
+        "text_input",
+        "key_press",
+        "press_key",
+        "shortcut",
+        "wait",
+        "sleep",
+        "uia_invoke",
+        "uia_action",
+        "focus_window"
+    ]),
+    target: z.string().optional(),
+    role: z.string().optional(),
+    uia_id: z.number().optional(),
+    automation_id: z.string().optional(),
+    x: z.number().optional(),
+    y: z.number().optional(),
+    from_x: z.number().optional(),
+    from_y: z.number().optional(),
+    to_x: z.number().optional(),
+    to_y: z.number().optional(),
+    from_target: z.string().optional(),
+    to_target: z.string().optional(),
+    button: z.enum(["left", "right", "middle"]).optional(),
+    click_type: z.enum(["single", "double"]).optional(),
+    direction: z.enum(["up", "down", "left", "right"]).optional(),
+    amount: z.number().optional(),
+    text: z.string().optional(),
+    clear_first: z.boolean().optional(),
+    press_enter: z.boolean().optional(),
+    key: z.string().optional(),
+    modifiers: z.array(z.string()).optional(),
+    duration_ms: z.number().optional(),
+    wait_after_ms: z.number().optional(),
+    smooth: z.boolean().optional()
 });
 
 export const toolRegistry = {
@@ -115,9 +173,7 @@ export const toolRegistry = {
 
     get_system_stats: {
         description: "Get CPU, memory and GPU usage.",
-        schema: z.object({
-            // no required parameters
-        }),
+        schema: z.object({}),
         execute: getSystemStats
     },
 
@@ -130,7 +186,8 @@ export const toolRegistry = {
     take_screenshot: {
         description: "Capture the current desktop or application window screenshot.",
         schema: z.object({
-            app_name: z.string().optional()
+            app_name: z.string().optional(),
+            include_ocr: z.boolean().optional()
         }),
         execute: takeScreenshot
     },
@@ -151,8 +208,31 @@ export const toolRegistry = {
         execute: browserSearch
     },
 
+    execute_action_sequence: {
+        description: "Execute a batched sequence of desktop actions (mouse movement, left/right/middle clicks, double clicks, drag and drop, scrolling, text input, key presses/shortcuts, and configurable waits) sequentially in the C# desktop service without requesting LLM inference between actions.",
+        schema: z.object({
+            app_name: z.string().optional(),
+            actions: z.array(actionStepSchema).min(1),
+            stop_on_error: z.boolean().optional(),
+            stop_on_window_change: z.boolean().optional(),
+            stop_on_dialog: z.boolean().optional(),
+            confirm_destructive: z.boolean().optional(),
+            depends_on_new_info: z.boolean().optional(),
+            inter_action_delay_ms: z.number().optional()
+        }),
+        execute: executeActionSequence
+    },
+
+    cancel_action_sequence: {
+        description: "Cancel a currently running desktop action sequence and release all mouse buttons and keyboard modifiers.",
+        schema: z.object({
+            reason: z.string().optional()
+        }),
+        execute: cancelDesktopSequence
+    },
+
     desktop_click: {
-        description: "Click a UI element, button, playlist, link, or coordinate inside an application window or on the desktop. Supports left click, right click, and double left click.",
+        description: "Click a UI element, button, playlist, link, or coordinate inside an application window or on the desktop. Supports left, right, middle, and double click. Prefers semantic Windows UI Automation first.",
         schema: clickSchema,
         execute: desktopClick
     },
@@ -186,6 +266,22 @@ export const toolRegistry = {
         execute: moveMouse
     },
 
+    desktop_drag: {
+        description: "Drag and drop from start coordinates/target to end coordinates/target.",
+        schema: z.object({
+            from_x: z.number().optional(),
+            from_y: z.number().optional(),
+            to_x: z.number().optional(),
+            to_y: z.number().optional(),
+            from_target: z.string().optional(),
+            to_target: z.string().optional(),
+            app_name: z.string().optional(),
+            button: z.enum(["left", "right", "middle"]).optional(),
+            duration_ms: z.number().optional()
+        }),
+        execute: dragAndDrop
+    },
+
     desktop_scroll: {
         description: "Scroll up, down, left, or right inside an application window or on the desktop.",
         schema: z.object({
@@ -206,7 +302,8 @@ export const toolRegistry = {
             target: z.string().optional(),
             app_name: z.string().optional(),
             press_enter: z.boolean().optional(),
-            clear_first: z.boolean().optional()
+            clear_first: z.boolean().optional(),
+            confirm_destructive: z.boolean().optional()
         }),
         execute: typeText
     },
@@ -216,37 +313,33 @@ export const toolRegistry = {
         schema: z.object({
             key: z.string(),
             modifiers: z.array(z.string()).optional(),
-            app_name: z.string().optional()
+            app_name: z.string().optional(),
+            confirm_destructive: z.boolean().optional()
         }),
         execute: pressKey
     },
 
     desktop_inspect: {
-        description: "Inspect the visible UI elements and state of an application window or the desktop using Windows UI Automation and Qwen vision.",
+        description: "Inspect the visible UI elements and compact screen state of an application window using Windows UI Automation, local OCR, and optional Qwen vision.",
         schema: z.object({
             app_name: z.string().optional(),
-            question: z.string().optional()
+            question: z.string().optional(),
+            use_vision: z.boolean().optional()
         }),
         execute: inspectDesktopUI
     },
 
     desktop_control: {
-        description: "Autonomously execute a multi-step in-application UI task sequentially using Windows UI Automation and Qwen vision screenshot guidance.",
+        description: "Autonomously execute a multi-step in-application UI task using batched action planning, Windows UI Automation, local OCR, and checkpoint-based Qwen vision verification.",
         schema: z.object({
             goal: z.string(),
             app_name: z.string().optional(),
-            max_steps: z.number().optional()
+            max_steps: z.number().optional(),
+            confirm_destructive: z.boolean().optional()
         }),
         execute: desktopControl
     }
 };
-
-function zodToJsonSchema(schema) {
-    // For this starter registry, we use explicit JSON schemas
-    // below. This helper is intentionally not implemented.
-    // Keep validation and model-facing schemas separate.
-    throw new Error("Use the explicit toolSchemas below");
-}
 
 export const toolSchemas = [
     {
@@ -446,8 +539,124 @@ export const toolSchemas = [
     {
         type: "function",
         function: {
+            name: "execute_action_sequence",
+            description: "Execute a batched sequence of desktop actions (mouse movement, left/right/middle clicks, double clicks, drag and drop, scrolling, text input, key presses/shortcuts, and configurable waits) sequentially in a single tool call without waiting for LLM inference between actions.",
+            parameters: {
+                type: "object",
+                properties: {
+                    app_name: {
+                        type: "string",
+                        description: "Optional application name to focus and lock onto (e.g. 'spotify', 'steam', 'chrome', 'notepad', 'calculator')."
+                    },
+                    actions: {
+                        type: "array",
+                        description: "Ordered list of desktop actions to execute sequentially.",
+                        items: {
+                            type: "object",
+                            properties: {
+                                action: {
+                                    type: "string",
+                                    enum: [
+                                        "move_mouse",
+                                        "left_click",
+                                        "right_click",
+                                        "middle_click",
+                                        "double_click",
+                                        "drag_and_drop",
+                                        "scroll",
+                                        "type_text",
+                                        "key_press",
+                                        "wait",
+                                        "uia_invoke"
+                                    ],
+                                    description: "Action type to perform."
+                                },
+                                target: {
+                                    type: "string",
+                                    description: "Semantic UI element name/label for UIA or OCR lookup (e.g. 'Play', 'Shuffle', 'Search', 'songs')."
+                                },
+                                x: {
+                                    type: "number",
+                                    description: "Optional X screen coordinate."
+                                },
+                                y: {
+                                    type: "number",
+                                    description: "Optional Y screen coordinate."
+                                },
+                                from_x: {
+                                    type: "number",
+                                    description: "Start X coordinate for drag_and_drop."
+                                },
+                                from_y: {
+                                    type: "number",
+                                    description: "Start Y coordinate for drag_and_drop."
+                                },
+                                to_x: {
+                                    type: "number",
+                                    description: "End X coordinate for drag_and_drop."
+                                },
+                                to_y: {
+                                    type: "number",
+                                    description: "End Y coordinate for drag_and_drop."
+                                },
+                                button: {
+                                    type: "string",
+                                    enum: ["left", "right", "middle"]
+                                },
+                                direction: {
+                                    type: "string",
+                                    enum: ["up", "down", "left", "right"]
+                                },
+                                amount: {
+                                    type: "number",
+                                    description: "Scroll wheel notches."
+                                },
+                                text: {
+                                    type: "string",
+                                    description: "Text to type for type_text."
+                                },
+                                press_enter: {
+                                    type: "boolean",
+                                    description: "Whether to press Enter after typing."
+                                },
+                                clear_first: {
+                                    type: "boolean",
+                                    description: "Whether to clear existing text before typing."
+                                },
+                                key: {
+                                    type: "string",
+                                    description: "Key name or shortcut combo for key_press (e.g. 'Enter', 'Space', 'ctrl+k', 'ctrl+l')."
+                                },
+                                duration_ms: {
+                                    type: "number",
+                                    description: "Wait duration in milliseconds for 'wait' or movement duration."
+                                }
+                            },
+                            required: ["action"]
+                        }
+                    },
+                    stop_on_window_change: {
+                        type: "boolean",
+                        description: "Stop execution if the target window unexpectedly changes (default true)."
+                    },
+                    confirm_destructive: {
+                        type: "boolean",
+                        description: "Set true only after the user has explicitly confirmed a destructive action."
+                    },
+                    depends_on_new_info: {
+                        type: "boolean",
+                        description: "Set true if a checkpoint verification is needed after this sequence completes."
+                    }
+                },
+                required: ["actions"]
+            }
+        }
+    },
+    {
+        type: "function",
+        function: {
             name: "desktop_click",
-            description: "Click a UI element, button, playlist, video, link, or coordinate inside an application window. Supports left click, right click, and double click. Uses Windows UI Automation first where available and Qwen vision screenshot analysis as fallback.",
+            description: "Click a UI element, button, playlist, video, link, or coordinate inside an application window. Supports left click, right click, middle click, and double click. Uses Windows UI Automation first, then local OCR, and Qwen vision as fallback.",
             parameters: {
                 type: "object",
                 properties: {
@@ -461,8 +670,8 @@ export const toolSchemas = [
                     },
                     button: {
                         type: "string",
-                        enum: ["left", "right"],
-                        description: "Mouse button: 'left' (default) or 'right'."
+                        enum: ["left", "right", "middle"],
+                        description: "Mouse button: 'left' (default), 'right', or 'middle'."
                     },
                     click_type: {
                         type: "string",
@@ -525,7 +734,7 @@ export const toolSchemas = [
                     },
                     target: {
                         type: "string",
-                        description: "Optional input field or search box to click before typing (e.g. 'Search bar', 'Store search')."
+                        description: "Optional input field or search box to focus/click before typing (e.g. 'Search bar', 'Store search')."
                     },
                     app_name: {
                         type: "string",
@@ -569,7 +778,7 @@ export const toolSchemas = [
         type: "function",
         function: {
             name: "desktop_inspect",
-            description: "Inspect the current application window using Windows UI Automation and Qwen vision screenshot analysis to see what buttons, playlists, or elements are on screen.",
+            description: "Inspect the current application window using Windows UI Automation, local OCR, and optional Qwen vision to see what buttons, playlists, or elements are on screen.",
             parameters: {
                 type: "object",
                 properties: {
@@ -579,7 +788,7 @@ export const toolSchemas = [
                     },
                     question: {
                         type: "string",
-                        description: "What to look for on the screen."
+                        description: "Optional visual question about the screen."
                     }
                 }
             }
@@ -589,13 +798,13 @@ export const toolSchemas = [
         type: "function",
         function: {
             name: "desktop_control",
-            description: "Perform multi-step in-application UI control sequentially using Windows UI Automation and Qwen vision screenshots (use after opening an app when multiple UI interactions are needed, e.g. selecting a playlist and clicking shuffle and play in Spotify, downloading a game in Steam, or opening the latest video/short on a YouTube channel).",
+            description: "Perform multi-step in-application UI control using batched action execution, Windows UI Automation, local OCR, and checkpoint-based Qwen vision verification.",
             parameters: {
                 type: "object",
                 properties: {
                     goal: {
                         type: "string",
-                        description: "Detailed in-application goal to execute step-by-step (e.g. 'go to playlists, select songs, click shuffle, and click play')."
+                        description: "Detailed in-application goal to execute (e.g. 'go to playlists, select songs, click shuffle, and click play')."
                     },
                     app_name: {
                         type: "string",
@@ -603,7 +812,7 @@ export const toolSchemas = [
                     },
                     max_steps: {
                         type: "number",
-                        description: "Maximum sequential steps (default 8)."
+                        description: "Maximum verification checkpoints (default 5)."
                     }
                 },
                 required: ["goal"]
