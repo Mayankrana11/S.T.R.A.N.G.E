@@ -1,11 +1,15 @@
-import "dotenv/config";
-
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import dotenv from "dotenv";
 
 import { askOllama, getActiveModelInfo } from "./agent/ollama.js";
 
-dotenv.config();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const BACKEND_ENV_PATH = path.resolve(__dirname, "../.env");
+
+dotenv.config({ path: BACKEND_ENV_PATH, override: true });
 
 const app = express();
 
@@ -49,6 +53,14 @@ app.post("/chat", async (req, res) => {
 
 app.listen(PORT, async () => {
     const modelInfo = await getActiveModelInfo();
-    console.log(`S.T.R.A.N.G.E backend running on port ${PORT}`);
-    console.log(`[STRANGE] Active local Ollama model: ${modelInfo.model}${modelInfo.parameter_size ? ` (${modelInfo.parameter_size})` : ""}`);
+    const mainMeta = [modelInfo.parameter_size, modelInfo.quantization_level].filter(Boolean).join(", ");
+    const visionMeta = [modelInfo.vision_parameter_size, modelInfo.vision_quantization_level].filter(Boolean).join(", ");
+    console.log("==================================");
+    console.log("       S.T.R.A.N.G.E. BACKEND");
+    console.log("==================================");
+    console.log(`Server Port  : ${PORT}`);
+    console.log(`Ollama Model : ${modelInfo.model}${mainMeta ? ` (${mainMeta})` : ""}`);
+    console.log(`Vision Model : ${modelInfo.vision_model}${visionMeta ? ` (${visionMeta})` : ""}`);
+    console.log(`Ollama Host  : ${modelInfo.host}`);
+    console.log("----------------------------------");
 });
