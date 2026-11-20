@@ -12,13 +12,30 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const BACKEND_ENV_PATH = path.resolve(__dirname, "../../.env");
+
+dotenv.config({ path: BACKEND_ENV_PATH, override: true });
+
+function normalizeModelTag(rawName) {
+    if (!rawName || typeof rawName !== "string") return "";
+    const trimmed = rawName.trim();
+    if (!trimmed.includes(":") && /-[0-9]+(\.[0-9]+)?b$/i.test(trimmed)) {
+        return trimmed.replace(/-([0-9]+(?:\.[0-9]+)?b)$/i, ":$1");
+    }
+    return trimmed;
+}
+
+function getMainModel() {
+    dotenv.config({ path: BACKEND_ENV_PATH, override: true });
+    return normalizeModelTag(process.env.OLLAMA_MODEL) || "qwen3.5:4b";
+}
 
 function getVisionModel() {
-    dotenv.config({ override: true });
+    dotenv.config({ path: BACKEND_ENV_PATH, override: true });
     return (
-        process.env.OLLAMA_VISION_MODEL?.trim() ||
-        process.env.OLLAMA_MODEL?.trim() ||
-        "qwen3.5:4b"
+        normalizeModelTag(process.env.OLLAMA_VISION_MODEL) ||
+        normalizeModelTag(process.env.OLLAMA_MODEL) ||
+        "qwen2.5vl:3b"
     );
 }
 
@@ -909,6 +926,10 @@ Respond ONLY with valid JSON in this exact format:
 
     try {
         const visionModel = getVisionModel();
+        logDesktop(
+            "VISION:MODEL",
+            `[MODEL: ${visionModel}] Running vision grounding inference for target="${target}"`
+        );
         const llmStart = Date.now();
         const response = await ollama.chat({
             model: visionModel,
@@ -924,6 +945,7 @@ Respond ONLY with valid JSON in this exact format:
             ]
         });
 
+        const usedVisionModel = response?.model || visionModel;
         const llmMs = Date.now() - llmStart;
         if (timings) timings.vision_inference_ms += llmMs;
         sessionPerformanceStats.vision_inferences_count += 1;
@@ -933,19 +955,22 @@ Respond ONLY with valid JSON in this exact format:
         try {
             parsed = JSON.parse(rawContent);
         } catch {
-            logDesktop("FAIL:VISION:JSON", `Vision model (${visionModel}) returned non-JSON: ${rawContent.slice(0, 200)}`);
+            logDesktop("FAIL:VISION:JSON", `[MODEL: ${usedVisionModel}] Vision model returned non-JSON: ${rawContent.slice(0, 200)}`);
             return {
                 found: false,
+                method: "vision",
+                model: usedVisionModel,
+                vision_model: usedVisionModel,
                 reason: "Vision model output was not valid JSON",
                 raw_output: rawContent
             };
         }
 
-        const coords = parseVisionCoordinates(parsed, captureRect, imageSize, visionModel);
+        const coords = parseVisionCoordinates(parsed, captureRect, imageSize, usedVisionModel);
         if (parsed.found && coords) {
             logDesktop(
                 "VISION:MATCH",
-                `[${visionModel}] Located "${parsed.label || target}" at screen (${coords.x}, ${coords.y}) [norm: ${coords.norm_x},${coords.norm_y}] in ${llmMs}ms`,
+                `[MODEL: ${usedVisionModel}] Located "${parsed.label || target}" at screen (${coords.x}, ${coords.y}) [norm: ${coords.norm_x},${coords.norm_y}] in ${llmMs}ms`,
                 {
                     bbox_2d: coords.bbox_2d,
                     confidence: parsed.confidence,
@@ -956,6 +981,8 @@ Respond ONLY with valid JSON in this exact format:
             return {
                 found: true,
                 method: "vision",
+                model: usedVisionModel,
+                vision_model: usedVisionModel,
                 x: coords.x,
                 y: coords.y,
                 bbox_2d: coords.bbox_2d,
@@ -969,7 +996,7 @@ Respond ONLY with valid JSON in this exact format:
             };
         }
 
-        logDesktop("VISION:MISS", `Target "${target}" not found in current view (${llmMs}ms)`, {
+        logDesktop("VISION:MISS", `[MODEL: ${usedVisionModel}] Target "${target}" not found in current view (${llmMs}ms)`, {
             reason: parsed.reason,
             needs_scroll: parsed.needs_scroll,
             visible_summary: parsed.visible_summary
@@ -978,6 +1005,8 @@ Respond ONLY with valid JSON in this exact format:
         return {
             found: false,
             method: "vision",
+            model: usedVisionModel,
+            vision_model: usedVisionModel,
             needs_scroll: parsed.needs_scroll || "none",
             visible_summary: parsed.visible_summary || null,
             reason: parsed.reason || `Target "${target}" was not found in the screenshot`,
@@ -985,10 +1014,13 @@ Respond ONLY with valid JSON in this exact format:
             elapsed_ms: Date.now() - t0
         };
     } catch (error) {
-        logDesktop("FAIL:VISION", `Vision inference error: ${error.message}`);
+        const visionModel = getVisionModel();
+        logDesktop("FAIL:VISION", `[MODEL: ${visionModel}] Vision inference error: ${error.message}`);
         return {
             found: false,
             method: "vision",
+            model: visionModel,
+            vision_model: visionModel,
             reason: `Vision inference failed: ${error.message}`
         };
     }
@@ -1089,6 +1121,8 @@ export async function resolveTargetCoordinates({
     return {
         found: false,
         failed_stage: "vision_lookup",
+        model: visionResult.model || visionResult.vision_model || getVisionModel(),
+        vision_model: visionResult.vision_model || visionResult.model || getVisionModel(),
         visible_summary: visionResult.visible_summary,
         screenshot_path: visionResult.screenshot_path,
         error: visionResult.reason || `Could not locate target "${target}" via UIA, Local OCR, or Vision.`
@@ -1240,9 +1274,14 @@ Respond ONLY with valid JSON in this exact format:
 }`;
 
     try {
+        const visionModel = getVisionModel();
+        logDesktop(
+            "VISION:MODEL",
+            `[MODEL: ${visionModel}] Running batched vision grounding for ${uniqueTargets.length} target(s): ${uniqueTargets.join(", ")}`
+        );
         const llmStart = Date.now();
         const response = await ollama.chat({
-            model: getVisionModel(),
+            model: visionModel,
             think: false,
             format: "json",
             options: { temperature: 0 },
@@ -1254,6 +1293,8 @@ Respond ONLY with valid JSON in this exact format:
                 }
             ]
         });
+        const usedVisionModel = response?.model || visionModel;
+        resolvedMap.vision_model = usedVisionModel;
         const llmMs = Date.now() - llmStart;
         if (timings) timings.vision_inference_ms += llmMs;
         sessionPerformanceStats.vision_inferences_count += 1;
@@ -1262,11 +1303,13 @@ Respond ONLY with valid JSON in this exact format:
         const list = Array.isArray(parsed.matches) ? parsed.matches : [];
         for (const item of list) {
             if (!item || !item.found) continue;
-            const coords = parseVisionCoordinates(item, captureRect, imageSize);
+            const coords = parseVisionCoordinates(item, captureRect, imageSize, usedVisionModel);
             if (coords && item.target) {
                 resolvedMap.set(String(item.target).trim().toLowerCase(), {
                     found: true,
                     method: "vision_batched",
+                    model: usedVisionModel,
+                    vision_model: usedVisionModel,
                     x: coords.x,
                     y: coords.y,
                     label: item.label || item.target,
@@ -1274,8 +1317,14 @@ Respond ONLY with valid JSON in this exact format:
                 });
             }
         }
+        logDesktop(
+            "VISION:BATCH_DONE",
+            `[MODEL: ${usedVisionModel}] Grounded ${resolvedMap.size}/${uniqueTargets.length} target(s) in ${llmMs}ms`
+        );
     } catch (err) {
-        logDesktop("WARN:VISION:BATCH", `Batched vision resolution failed: ${err.message}`);
+        const visionModel = getVisionModel();
+        resolvedMap.vision_model = visionModel;
+        logDesktop("WARN:VISION:BATCH", `[MODEL: ${visionModel}] Batched vision resolution failed: ${err.message}`);
     }
 
     return resolvedMap;
@@ -1352,6 +1401,7 @@ export async function executeActionSequence(args = {}) {
             appSwitched = Boolean(winRes.app_switched);
 
             const preparedActions = rawActions.map((s) => ({ ...s }));
+            let visionModelUsed = null;
 
             // Resolve drag from_target / to_target via UIA/OCR first if present
             for (let i = 0; i < preparedActions.length; i++) {
@@ -1373,6 +1423,7 @@ export async function executeActionSequence(args = {}) {
                             allowScrollRetry: false,
                             timings
                         });
+                        if (fromRes.vision_model) visionModelUsed = fromRes.vision_model;
                         if (fromRes.found) {
                             step.from_x = fromRes.x;
                             step.from_y = fromRes.y;
@@ -1387,6 +1438,7 @@ export async function executeActionSequence(args = {}) {
                             allowScrollRetry: false,
                             timings
                         });
+                        if (toRes.vision_model) visionModelUsed = toRes.vision_model;
                         if (toRes.found) {
                             step.to_x = toRes.x;
                             step.to_y = toRes.y;
@@ -1434,9 +1486,10 @@ export async function executeActionSequence(args = {}) {
                     .filter(Boolean);
 
                 if (targetsToGround.length > 0) {
+                    const activeVisionModel = getVisionModel();
                     logDesktop(
                         "VISION:CHECKPOINT_FALLBACK",
-                        `Step ${failedIdx + 1} target not found in UIA/OCR. Grounding ${targetsToGround.length} remaining target(s) in a SINGLE vision pass...`
+                        `[MODEL: ${activeVisionModel}] Step ${failedIdx + 1} target not found in UIA/OCR. Grounding ${targetsToGround.length} remaining target(s) in a SINGLE vision pass...`
                     );
                     let visionMap = await resolveMultipleTargetsWithVision(
                         targetsToGround,
@@ -1444,6 +1497,7 @@ export async function executeActionSequence(args = {}) {
                         profile,
                         timings
                     );
+                    visionModelUsed = visionMap.vision_model || activeVisionModel;
 
                     // If multi-target vision missed the immediate failed target, try single-target vision once on that target
                     const immediateTarget = String(remainingActions[0].target || "").trim();
@@ -1455,6 +1509,9 @@ export async function executeActionSequence(args = {}) {
                             "",
                             timings
                         );
+                        if (singleVis.vision_model) {
+                            visionModelUsed = singleVis.vision_model;
+                        }
                         if (singleVis.found) {
                             visionMap.set(immediateTarget.toLowerCase(), singleVis);
                         }
@@ -1469,6 +1526,7 @@ export async function executeActionSequence(args = {}) {
                             remStep.y = vMatch.y;
                             remStep.prefer_uia = false;
                             remStep.resolved_by = "vision";
+                            remStep.vision_model = vMatch.vision_model || visionModelUsed;
                             remStep.matched_label = vMatch.label;
                             anyResolved = true;
                         }
@@ -1496,7 +1554,8 @@ export async function executeActionSequence(args = {}) {
                             ...priorSuccessResults,
                             ...(retryRes?.results || []).map((r, idx) => ({
                                 ...r,
-                                step_index: failedIdx + idx
+                                step_index: failedIdx + idx,
+                                vision_model: remainingActions[idx]?.vision_model || null
                             }))
                         ];
 
@@ -1550,6 +1609,8 @@ export async function executeActionSequence(args = {}) {
                 return {
                     success: false,
                     action: "execute_action_sequence",
+                    model: visionModelUsed || null,
+                    vision_model: visionModelUsed || null,
                     requires_confirmation: Boolean(seqRes?.requires_confirmation),
                     cancelled: Boolean(seqRes?.cancelled),
                     aborted_reason: seqRes?.aborted_reason || "sequence_failed",
@@ -1576,6 +1637,8 @@ export async function executeActionSequence(args = {}) {
             return {
                 success: true,
                 action: "execute_action_sequence",
+                model: visionModelUsed || null,
+                vision_model: visionModelUsed || null,
                 app_name: profile?.id || appName || seqRes?.target_window?.process_name || null,
                 target_window: seqRes?.target_window || windowInfo,
                 calculator_display: seqRes?.calculator_display || null,
@@ -1661,6 +1724,7 @@ export async function dragAndDrop(args = {}) {
         let toX = Number.isFinite(Number(args.to_x)) ? Math.round(Number(args.to_x)) : null;
         let toY = Number.isFinite(Number(args.to_y)) ? Math.round(Number(args.to_y)) : null;
 
+        let visionModelUsed = null;
         if ((fromX === null || fromY === null) && args.from_target) {
             const fromRes = await resolveTargetCoordinates({
                 target: args.from_target,
@@ -1670,10 +1734,13 @@ export async function dragAndDrop(args = {}) {
                 allowScrollRetry: false,
                 timings
             });
+            if (fromRes.vision_model) visionModelUsed = fromRes.vision_model;
             if (!fromRes.found) {
                 return {
                     success: false,
                     action: "desktop_drag",
+                    model: visionModelUsed,
+                    vision_model: visionModelUsed,
                     failed_stage: "from_target_resolution",
                     error: fromRes.error,
                     timings_ms: finalizeTimingBucket(timings, opStart)
@@ -1692,10 +1759,13 @@ export async function dragAndDrop(args = {}) {
                 allowScrollRetry: false,
                 timings
             });
+            if (toRes.vision_model) visionModelUsed = toRes.vision_model;
             if (!toRes.found) {
                 return {
                     success: false,
                     action: "desktop_drag",
+                    model: visionModelUsed,
+                    vision_model: visionModelUsed,
                     failed_stage: "to_target_resolution",
                     error: toRes.error,
                     timings_ms: finalizeTimingBucket(timings, opStart)
@@ -1719,6 +1789,8 @@ export async function dragAndDrop(args = {}) {
         return {
             ...dragRes,
             action: "desktop_drag",
+            model: visionModelUsed,
+            vision_model: visionModelUsed,
             timings_ms: finalizeTimingBucket(timings, opStart),
             simulated: false
         };
@@ -1871,6 +1943,8 @@ export async function desktopClick(args = {}) {
                     return {
                         success: false,
                         action: "desktop_click",
+                        model: resolved.vision_model || resolved.model || null,
+                        vision_model: resolved.vision_model || null,
                         failed_stage: resolved.failed_stage || "target_resolution",
                         target,
                         target_disabled: Boolean(resolved.target_disabled),
@@ -1892,7 +1966,7 @@ export async function desktopClick(args = {}) {
 
             logDesktop(
                 "INPUT:CLICK",
-                `Performing ${clickType} ${button}-click at (${clickX}, ${clickY}) [target="${resolutionInfo.label}", method=${resolutionInfo.method}]`
+                `Performing ${clickType} ${button}-click at (${clickX}, ${clickY}) [target="${resolutionInfo.label}", method=${resolutionInfo.method}${resolutionInfo.vision_model ? `, model=${resolutionInfo.vision_model}` : ""}]`
             );
 
             const clickStart = Date.now();
@@ -1914,6 +1988,8 @@ export async function desktopClick(args = {}) {
                 return {
                     success: false,
                     action: "desktop_click",
+                    model: resolutionInfo.vision_model || resolutionInfo.model || null,
+                    vision_model: resolutionInfo.vision_model || null,
                     failed_stage: "mouse_click",
                     target: target || null,
                     requested_x: clickX,
@@ -1931,6 +2007,8 @@ export async function desktopClick(args = {}) {
             return {
                 success: true,
                 action: "desktop_click",
+                model: resolutionInfo.vision_model || resolutionInfo.model || null,
+                vision_model: resolutionInfo.vision_model || null,
                 button,
                 click_type: clickType,
                 target: target || null,
@@ -2005,6 +2083,7 @@ export async function scrollDesktop(args = {}) {
 
             let scrollX = Number.isFinite(Number(args.x)) ? Math.round(Number(args.x)) : null;
             let scrollY = Number.isFinite(Number(args.y)) ? Math.round(Number(args.y)) : null;
+            let visionModelUsed = null;
 
             if (scrollX === null && scrollY === null && target) {
                 const resolved = await resolveTargetCoordinates({
@@ -2015,6 +2094,7 @@ export async function scrollDesktop(args = {}) {
                     allowScrollRetry: false,
                     timings
                 });
+                if (resolved.vision_model) visionModelUsed = resolved.vision_model;
                 if (resolved.found) {
                     scrollX = resolved.x;
                     scrollY = resolved.y;
@@ -2039,6 +2119,8 @@ export async function scrollDesktop(args = {}) {
                 return {
                     success: false,
                     action: "desktop_scroll",
+                    model: visionModelUsed,
+                    vision_model: visionModelUsed,
                     failed_stage: "mouse_scroll",
                     target_window: scrollRes?.target_window || windowInfo,
                     error: scrollRes?.error || "Mouse scroll failed.",
@@ -2052,6 +2134,8 @@ export async function scrollDesktop(args = {}) {
             return {
                 success: true,
                 action: "desktop_scroll",
+                model: visionModelUsed,
+                vision_model: visionModelUsed,
                 direction,
                 amount,
                 x: scrollRes.x,
@@ -2126,6 +2210,7 @@ export async function typeText(args = {}) {
 
             // Try direct UIA ValuePattern or UIA-focused typing first when target is specified
             let clickedInput = null;
+            let visionModelUsed = null;
             if (target) {
                 const uiaStart = Date.now();
                 const uiaTypeRes = await nativeBridge.send("uia_action", {
@@ -2178,11 +2263,14 @@ export async function typeText(args = {}) {
                     allowScrollRetry: false,
                     timings
                 });
+                if (resolved.vision_model) visionModelUsed = resolved.vision_model;
 
                 if (!resolved.found) {
                     return {
                         success: false,
                         action: "desktop_type",
+                        model: visionModelUsed,
+                        vision_model: visionModelUsed,
                         failed_stage: "input_target_lookup",
                         target,
                         error: resolved.error || `Could not locate input field "${target}" before typing.`,
@@ -2209,6 +2297,8 @@ export async function typeText(args = {}) {
                     return {
                         success: false,
                         action: "desktop_type",
+                        model: visionModelUsed,
+                        vision_model: visionModelUsed,
                         failed_stage: "input_field_click",
                         error: clickRes?.error || `Failed to click input field "${target}"`,
                         timings_ms: finalizeTimingBucket(timings, opStart),
@@ -2220,7 +2310,8 @@ export async function typeText(args = {}) {
                     x: resolved.x,
                     y: resolved.y,
                     method: resolved.method,
-                    label: resolved.label
+                    label: resolved.label,
+                    vision_model: visionModelUsed
                 };
 
                 await sleep(120);
@@ -2240,6 +2331,8 @@ export async function typeText(args = {}) {
                 return {
                     success: false,
                     action: "desktop_type",
+                    model: visionModelUsed,
+                    vision_model: visionModelUsed,
                     failed_stage: "type_text",
                     target_window: typeRes?.target_window || windowInfo,
                     error: typeRes?.error || "Failed to type text.",
@@ -2253,6 +2346,8 @@ export async function typeText(args = {}) {
             return {
                 success: true,
                 action: "desktop_type",
+                model: visionModelUsed,
+                vision_model: visionModelUsed,
                 text,
                 target: target || null,
                 clicked_input: clickedInput,
@@ -2430,11 +2525,11 @@ export async function captureDesktopScreenshot(args = {}) {
 export async function inspectDesktopUI(args = {}) {
     const appName = typeof args.app_name === "string" ? args.app_name.trim() : "";
     const question = typeof args.question === "string" ? args.question.trim() : "";
-    const useVision = Boolean(args.use_vision || question);
+    const useVision = args.use_vision !== false;
 
     return enqueueDesktopAction(
         "desktop_inspect",
-        { app_name: appName || null, question: question || "compact_screen_state" },
+        { app_name: appName || null, question: question || "visual_screen_inspection", use_vision: useVision },
         async () => {
             const opStart = Date.now();
             const timings = createTimingBucket();
@@ -2454,15 +2549,14 @@ export async function inspectDesktopUI(args = {}) {
             const profile = winRes.profile || null;
             const isElectron = isElectronOrCefWindow(windowInfo, profile);
 
-            // Retrieve fast compact screen state via Windows UIA + Local Windows OCR + Screenshot Diff
+            // Retrieve fast compact screen state via Windows UIA (skip redundant WinRT OCR screenshot when using Vision LLM)
             const compactState = await getCompactScreenState(windowInfo, {
                 query: question,
-                includeOcr: true,
+                includeOcr: !useVision,
                 maxElements: 65,
                 timings
             });
 
-            // Only invoke Qwen Vision if explicitly asked a visual question or if both UIA and Local OCR returned zero elements
             const hasRichLocalState =
                 (compactState.uia_elements?.length || 0) >= 3 ||
                 (compactState.ocr_lines?.length || 0) >= 2;
@@ -2488,15 +2582,28 @@ export async function inspectDesktopUI(args = {}) {
 
             await fs.promises.mkdir(SCREENSHOT_DIR, { recursive: true });
             const savePath = path.join(SCREENSHOT_DIR, "latest_inspect.jpg");
+            const cropRect =
+                windowInfo?.rect?.width >= 100 && windowInfo?.rect?.height >= 80
+                    ? windowInfo.rect
+                    : undefined;
             const shotStart = Date.now();
-            const shotRes = await nativeBridge.send("screenshot", {
-                hwnd: windowInfo?.hwnd || 0,
-                crop_rect: windowInfo?.rect,
+            let shotRes = await nativeBridge.send("screenshot", {
+                hwnd: cropRect ? (windowInfo?.hwnd || 0) : 0,
+                crop_rect: cropRect,
                 max_width: 1280,
                 format: "jpeg",
                 quality: 82,
                 save_path: savePath
             });
+            if ((!shotRes?.success || !shotRes.base64) && cropRect) {
+                shotRes = await nativeBridge.send("screenshot", {
+                    hwnd: 0,
+                    max_width: 1280,
+                    format: "jpeg",
+                    quality: 82,
+                    save_path: savePath
+                });
+            }
             timings.screenshot_capture_ms += Date.now() - shotStart;
 
             if (!shotRes?.success || !shotRes.base64) {
@@ -2527,9 +2634,14 @@ export async function inspectDesktopUI(args = {}) {
                 };
             }
 
+            const uiaNames = (compactState.uia_elements || [])
+                .map((e) => e.name)
+                .filter(Boolean)
+                .slice(0, 20);
+            const uiaHint = uiaNames.length > 0 ? `\nAccessible UI controls: ${JSON.stringify(uiaNames)}` : "";
+
             const prompt = `Inspect this screenshot of "${windowInfo?.title || "Desktop"}".
-Question / Focus: ${question || "Describe the visible interactive UI elements, buttons, playlists, or items."}
-Local OCR detected text: ${JSON.stringify((compactState.ocr_lines || []).slice(0, 25).map((l) => l.text))}
+Question / Focus: ${question || "Describe the visible interactive UI elements, buttons, playlists, or items."}${uiaHint}
 Return JSON with:
 {
   "summary": "concise description of current screen state",
@@ -2537,9 +2649,14 @@ Return JSON with:
   "answer": "direct answer to the question"
 }`;
 
+            const visionModel = getVisionModel();
+            logDesktop(
+                "VISION:MODEL",
+                `[MODEL: ${visionModel}] Running desktop_inspect visual analysis on "${windowInfo?.title || "Desktop"}"`
+            );
             const llmStart = Date.now();
             const response = await ollama.chat({
-                model: getVisionModel(),
+                model: visionModel,
                 think: false,
                 format: "json",
                 messages: [
@@ -2550,8 +2667,15 @@ Return JSON with:
                     }
                 ]
             });
-            timings.vision_inference_ms += Date.now() - llmStart;
+            const usedVisionModel = response?.model || visionModel;
+            const llmMs = Date.now() - llmStart;
+            timings.vision_inference_ms += llmMs;
             sessionPerformanceStats.vision_inferences_count += 1;
+
+            logDesktop(
+                "VISION:INSPECT_DONE",
+                `[MODEL: ${usedVisionModel}] Completed visual inspection in ${llmMs}ms`
+            );
 
             let parsed = {};
             try {
@@ -2563,6 +2687,8 @@ Return JSON with:
             return {
                 success: true,
                 action: "desktop_inspect",
+                model: usedVisionModel,
+                vision_model: usedVisionModel,
                 window_title: windowInfo?.title || null,
                 process_name: windowInfo?.process_name || null,
                 active_window: compactState.active_window || windowInfo,
@@ -2726,12 +2852,16 @@ export async function desktopControl(args = {}) {
             const stepHistory = [];
             const checkpointLogs = [];
             let nextCheckpointReason = "app_opened_or_switched";
+            let visionModelUsed = null;
+            let lastControlModelUsed = null;
 
             for (let cycle = 1; cycle <= maxCheckpoints; cycle++) {
                 if (activeSequenceAbortRequested) {
                     return {
                         success: false,
                         action: "desktop_control",
+                        model: visionModelUsed || lastControlModelUsed || null,
+                        vision_model: visionModelUsed || null,
                         cancelled: true,
                         status: "cancelled",
                         steps_executed: stepHistory,
@@ -2874,16 +3004,27 @@ Return ONLY valid JSON with this structure:
                     userMsg.images = [shotRes.base64];
                 }
 
+                const hasVisionImage = Boolean(userMsg.images);
+                const selectedCycleModel = hasVisionImage ? getVisionModel() : getMainModel();
+
+                logDesktop(
+                    "CONTROL:MODEL",
+                    `[MODEL: ${selectedCycleModel}] Running checkpoint ${cycle}/${maxCheckpoints} prompt (vision_image=${hasVisionImage})`
+                );
+
                 const response = await ollama.chat({
-                    model: getVisionModel(),
+                    model: selectedCycleModel,
                     think: false,
                     format: "json",
                     options: { temperature: 0 },
                     messages: [userMsg]
                 });
+                const usedCycleModel = response?.model || selectedCycleModel;
+                lastControlModelUsed = usedCycleModel;
                 const llmMs = Date.now() - llmStart;
-                timings.vision_inference_ms += llmMs;
-                if (userMsg.images) {
+                if (hasVisionImage) {
+                    visionModelUsed = usedCycleModel;
+                    timings.vision_inference_ms += llmMs;
                     sessionPerformanceStats.vision_inferences_count += 1;
                 }
 
@@ -2891,10 +3032,12 @@ Return ONLY valid JSON with this structure:
                 try {
                     plan = JSON.parse(response.message?.content || "{}");
                 } catch {
-                    logDesktop("FAIL:CONTROL:JSON", `Invalid JSON at checkpoint ${cycle}: ${response.message?.content}`);
+                    logDesktop("FAIL:CONTROL:JSON", `[MODEL: ${usedCycleModel}] Invalid JSON at checkpoint ${cycle}: ${response.message?.content}`);
                     return {
                         success: false,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         failed_stage: `checkpoint_${cycle}_json_parse`,
                         steps_executed: stepHistory,
                         error: "Planner returned invalid JSON.",
@@ -2911,7 +3054,7 @@ Return ONLY valid JSON with this structure:
 
                 logDesktop(
                     `CONTROL:CHECKPOINT ${cycle}/${maxCheckpoints}`,
-                    `Status="${planStatus}" | Planned ${plannedSteps.length} action(s) in ${llmMs}ms [reason=${nextCheckpointReason}, with_image=${Boolean(userMsg.images)}]`,
+                    `[MODEL: ${usedCycleModel}] Status="${planStatus}" | Planned ${plannedSteps.length} action(s) in ${llmMs}ms [reason=${nextCheckpointReason}, with_image=${hasVisionImage}]`,
                     { thought: plan.thought, completes_goal: plan.completes_goal }
                 );
 
@@ -2919,6 +3062,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: true,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         goal,
                         app_name: profile?.id || appName || windowInfo?.process_name || null,
                         window_title: windowInfo?.title || null,
@@ -2937,6 +3082,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: false,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         failed_stage: `checkpoint_${cycle}_model_abort`,
                         goal,
                         steps_executed: stepHistory,
@@ -2959,6 +3106,8 @@ Return ONLY valid JSON with this structure:
                             return {
                                 success: false,
                                 action: "desktop_control",
+                                model: visionModelUsed || usedCycleModel,
+                                vision_model: visionModelUsed,
                                 requires_confirmation: true,
                                 destructive_action_detected: true,
                                 blocked_action: rawStep,
@@ -2998,7 +3147,8 @@ Return ONLY valid JSON with this structure:
                         const coords = parseVisionCoordinates(
                             { found: true, bbox_2d: rawStep.bbox_2d },
                             captureRect,
-                            imageSize
+                            imageSize,
+                            usedCycleModel
                         );
                         if (coords) {
                             nativeStep.x = coords.x;
@@ -3037,6 +3187,8 @@ Return ONLY valid JSON with this structure:
                     stepHistory.push({
                         step: stepHistory.length + 1,
                         checkpoint_cycle: cycle,
+                        model: usedCycleModel,
+                        vision_model: hasVisionImage ? usedCycleModel : null,
                         action: r.action,
                         target: r.matched_label || r.target || r.text || r.key || null,
                         method: r.detection_method || (r.uia_pattern ? "uia_pattern" : "native_sequence"),
@@ -3064,6 +3216,8 @@ Return ONLY valid JSON with this structure:
 
                 checkpointLogs.push({
                     cycle,
+                    model: usedCycleModel,
+                    vision_model: hasVisionImage ? usedCycleModel : null,
                     actions_executed: batchRes?.total_executed || 0,
                     batch_success: Boolean(batchRes?.success),
                     checkpoint: evaluatedCp
@@ -3073,6 +3227,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: false,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         requires_confirmation: true,
                         destructive_action_detected: true,
                         blocked_action: batchRes.blocked_action,
@@ -3088,6 +3244,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: false,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         failed_stage: "unexpected_window_change",
                         unexpected_window_change: true,
                         steps_executed: stepHistory,
@@ -3105,6 +3263,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: true,
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         goal,
                         app_name: profile?.id || appName || windowInfo?.process_name || null,
                         window_title: batchRes.target_window?.title || windowInfo?.title || null,
@@ -3124,6 +3284,8 @@ Return ONLY valid JSON with this structure:
                     return {
                         success: Boolean(batchRes?.success),
                         action: "desktop_control",
+                        model: visionModelUsed || usedCycleModel,
+                        vision_model: visionModelUsed,
                         goal,
                         app_name: profile?.id || appName || windowInfo?.process_name || null,
                         window_title: batchRes.target_window?.title || windowInfo?.title || null,
@@ -3145,6 +3307,8 @@ Return ONLY valid JSON with this structure:
             return {
                 success: true,
                 action: "desktop_control",
+                model: visionModelUsed || lastControlModelUsed || null,
+                vision_model: visionModelUsed || null,
                 goal,
                 app_name: profile?.id || appName || windowInfo?.process_name || null,
                 window_title: windowInfo?.title || null,
