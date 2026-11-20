@@ -10,6 +10,7 @@ const API_URL = `${BASE_URL}/chat`;
 async function queryLocalOllamaModel() {
     dotenv.config({ override: true });
     const configuredModel = process.env.OLLAMA_MODEL?.trim();
+    const configuredVisionModel = process.env.OLLAMA_VISION_MODEL?.trim() || configuredModel;
     const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
 
     try {
@@ -39,6 +40,7 @@ async function queryLocalOllamaModel() {
 
         return {
             model: matchedInstalled?.model || matchedRunning?.model || targetName,
+            vision_model: configuredVisionModel || matchedInstalled?.model || targetName,
             parameter_size: details.parameter_size || null,
             quantization_level: details.quantization_level || null,
             family: details.family || null,
@@ -48,6 +50,7 @@ async function queryLocalOllamaModel() {
     } catch {
         return {
             model: configuredModel || "unknown",
+            vision_model: configuredVisionModel || configuredModel || "unknown",
             parameter_size: null,
             quantization_level: null,
             family: null,
@@ -79,6 +82,20 @@ function formatModelLabel(info) {
     return meta ? `${info.model} (${meta})` : info.model;
 }
 
+function formatTimingsInline(timings) {
+    if (!timings || typeof timings !== "object") return "";
+    const parts = [
+        `uia:${timings.uia_lookup_ms ?? 0}ms`,
+        `input:${timings.mouse_keyboard_execution_ms ?? 0}ms`,
+        `shot:${timings.screenshot_capture_ms ?? 0}ms`,
+        `vision:${timings.vision_inference_ms ?? 0}ms`,
+        `verify:${timings.verification_ms ?? 0}ms`,
+        `overhead:${timings.tool_call_overhead_ms ?? 0}ms`,
+        `total:${timings.total_ms ?? 0}ms`
+    ];
+    return ` [${parts.join(", ")}]`;
+}
+
 function formatToolCallSummary(tool) {
     const res = tool.result;
     const inner = res?.result;
@@ -87,16 +104,22 @@ function formatToolCallSummary(tool) {
 
     if (res?.success === false) {
         const stage = inner?.failed_stage ? ` [stage: ${inner.failed_stage}]` : "";
-        detail = ` -> [${status}]${stage} ${res.error || inner?.error || "Unknown error"}`;
+        detail = ` -> [${status}]${stage} ${res.error || inner?.error || "Unknown error"}${formatTimingsInline(inner?.timings_ms)}`;
     } else if (inner) {
-        if (inner.action === "desktop_click") {
-            detail = ` -> [${status}] ${inner.click_type} ${inner.button}-click "${inner.matched_label || inner.target}" at (${inner.x}, ${inner.y}) via ${inner.detection_method}`;
+        if (inner.action === "execute_action_sequence") {
+            const cpReason = inner.checkpoint?.primary_reason ? `, checkpoint:${inner.checkpoint.primary_reason}` : "";
+            const calcDisp = inner.calculator_display ? `, display:"${inner.calculator_display}"` : "";
+            detail = ` -> [${status}] batched ${inner.total_executed}/${inner.total_requested} action(s) in "${inner.target_window?.title || inner.app_name || "Desktop"}"${calcDisp}${cpReason}${formatTimingsInline(inner.timings_ms)}`;
+        } else if (inner.action === "desktop_click") {
+            detail = ` -> [${status}] ${inner.click_type} ${inner.button}-click "${inner.matched_label || inner.target}" at (${inner.x}, ${inner.y}) via ${inner.detection_method}${formatTimingsInline(inner.timings_ms)}`;
         } else if (inner.action === "desktop_type") {
-            detail = ` -> [${status}] typed "${inner.text}"${inner.target ? ` into "${inner.target}"` : ""}`;
+            const calcDisp = inner.calculator_display ? ` [display: "${inner.calculator_display}"]` : "";
+            detail = ` -> [${status}] typed "${inner.text}"${inner.target ? ` into "${inner.target}"` : ""}${calcDisp}${formatTimingsInline(inner.timings_ms)}`;
         } else if (inner.action === "desktop_scroll") {
-            detail = ` -> [${status}] scrolled ${inner.direction} (${inner.amount})`;
+            detail = ` -> [${status}] scrolled ${inner.direction} (${inner.amount})${formatTimingsInline(inner.timings_ms)}`;
         } else if (inner.action === "desktop_control") {
-            detail = ` -> [${status}] ${inner.total_steps ?? 0} step(s) (${inner.status})`;
+            const calcDisp = inner.calculator_display ? `, display:"${inner.calculator_display}"` : "";
+            detail = ` -> [${status}] ${inner.total_steps ?? 0} action(s) (${inner.status}${calcDisp})${formatTimingsInline(inner.timings_ms)}`;
         } else if (inner.action === "open_application") {
             detail = ` -> [${status}] opened ${inner.application_name || inner.application}`;
         } else if (inner.action === "close_application") {
@@ -141,8 +164,16 @@ async function sendMessage(message) {
             console.log("\n[TOOLS]");
             for (const tool of data.tool_calls) {
                 console.log(formatToolCallSummary(tool));
-                if (tool.result?.result?.steps_executed?.length) {
-                    for (const step of tool.result.result.steps_executed) {
+                const inner = tool.result?.result;
+                if (inner?.results?.length) {
+                    for (const step of inner.results) {
+                        const stepState = step.success ? "OK" : `FAIL: ${step.error}`;
+                        const winTitle = step.target_window?.title ? ` [${step.target_window.title}]` : "";
+                        console.log(`    [Action ${(step.step_index ?? 0) + 1}] ${step.action}${winTitle}: ${stepState} (${step.duration_ms ?? 0}ms)`);
+                    }
+                }
+                if (inner?.steps_executed?.length) {
+                    for (const step of inner.steps_executed) {
                         console.log(`    [Step ${step.step}] ${step.action}: ${step.outcome} (${step.thought || ""})`);
                     }
                 }
@@ -164,6 +195,9 @@ console.log("==================================");
 console.log("       S.T.R.A.N.G.E. TERMINAL");
 console.log("==================================");
 console.log(`Ollama Model : ${formatModelLabel(modelInfo)}`);
+if (modelInfo.vision_model && modelInfo.vision_model !== modelInfo.model) {
+    console.log(`Vision Model : ${modelInfo.vision_model}`);
+}
 console.log(`Ollama Host  : ${modelInfo.host}`);
 console.log("----------------------------------");
 console.log("Type a command or question.");
