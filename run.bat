@@ -11,7 +11,7 @@ echo.
 start "Ollama Models" cmd /k "ollama list"
 
 :: Terminal 2 - Backend server
-start "STRANGE Backend" cmd /k "cd /d "%~dp0backend\src" && node server.js"
+start "STRANGE Backend" cmd /k "cd /d "%~dp0backend" && node --watch src/server.js"
 
 :: Terminal 3 - Backend terminal
 start "STRANGE Terminal" cmd /k "cd /d "%~dp0backend" && npm run terminal"
