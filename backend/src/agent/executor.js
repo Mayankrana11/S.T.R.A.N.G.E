@@ -1,12 +1,16 @@
 import { toolRegistry } from "./registry.js";
 import { resolveApplication } from "../tools/applications.js";
-import { recordActiveApplicationContext } from "../tools/desktop.js";
+import { recordActiveApplicationContext, ensureTargetWindow } from "../tools/desktop.js";
 
 const DESKTOP_APP_TOOLS = new Set([
+    "execute_action_sequence",
+    "cancel_action_sequence",
     "desktop_click",
     "left_click",
     "right_click",
     "double_click",
+    "move_mouse",
+    "desktop_drag",
     "desktop_scroll",
     "desktop_type",
     "desktop_press_key",
@@ -16,6 +20,7 @@ const DESKTOP_APP_TOOLS = new Set([
 ]);
 
 export async function executeTool(toolCall) {
+    const execStartMs = Date.now();
     const name = toolCall.function?.name;
     let args = toolCall.function?.arguments;
 
@@ -39,29 +44,27 @@ export async function executeTool(toolCall) {
         };
     }
 
-    function normalizeFilesystemPath(toolName, args) {
+    function normalizeFilesystemPath(toolName, rawArgs) {
         const filesystemTools = new Set([
             "list_directory",
             "read_file",
             "write_file",
-            "create_directory",
+            "create_directory"
         ]);
 
         if (
             !filesystemTools.has(toolName) ||
-            typeof args?.path !== "string"
+            typeof rawArgs?.path !== "string"
         ) {
-            return args;
+            return rawArgs;
         }
 
-        let normalizedPath = args.path.trim().replace(/\\/g, "/");
+        let normalizedPath = rawArgs.path.trim().replace(/\\/g, "/");
 
-        // The sandbox is already the root directory.
         if (normalizedPath.toLowerCase() === "sandbox") {
             normalizedPath = ".";
         }
 
-        // Remove redundant sandbox/ prefixes.
         while (normalizedPath.toLowerCase().startsWith("sandbox/")) {
             normalizedPath = normalizedPath.slice("sandbox/".length);
         }
@@ -71,8 +74,8 @@ export async function executeTool(toolCall) {
         }
 
         return {
-            ...args,
-            path: normalizedPath,
+            ...rawArgs,
+            path: normalizedPath
         };
     }
 
@@ -136,20 +139,40 @@ export async function executeTool(toolCall) {
     }
 
     try {
+        const preInvokeOverheadMs = Date.now() - execStartMs;
         const result = await tool.execute(validation.data);
+
+        if (result && typeof result === "object" && result.timings_ms) {
+            result.timings_ms.tool_call_overhead_ms =
+                Number(result.timings_ms.tool_call_overhead_ms || 0) + preInvokeOverheadMs;
+        }
 
         if (name === "open_application" && result?.success && result?.canonical_id) {
             recordActiveApplicationContext(result.canonical_id);
+            try {
+                const focusRes = await ensureTargetWindow(result.canonical_id, {
+                    waitTimeoutMs: 4500,
+                    settleAfterFocusMs: 120
+                });
+                if (focusRes?.success && focusRes.window) {
+                    result.window_ready = true;
+                    result.window_title = focusRes.window.title;
+                    result.hwnd = focusRes.window.hwnd;
+                }
+            } catch {
+                // Non-fatal if background app has no immediate top-level window
+            }
         }
 
-        if (result && result.requires_clarification) {
+        if (result && (result.requires_clarification || result.requires_confirmation)) {
             return {
                 success: false,
                 tool: name,
-                status: result.status,
-                requires_clarification: true,
+                status: result.status || (result.requires_confirmation ? "requires_confirmation" : "requires_clarification"),
+                requires_clarification: Boolean(result.requires_clarification),
+                requires_confirmation: Boolean(result.requires_confirmation),
                 error: result.error || result.message,
-                message: result.message,
+                message: result.message || result.error,
                 candidates: result.candidates,
                 confidence: result.confidence,
                 result
